@@ -30,3 +30,5 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
 ## 项目依赖
 - sys2
 - asio
+- openssl.cmake
+- srtp.cmake

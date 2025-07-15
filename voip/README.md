@@ -29,3 +29,4 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
 ## 项目依赖
 - sys2
 - litertp (该项目已废弃，后面会改成对rtpx的引用)
+- opal.cmake
