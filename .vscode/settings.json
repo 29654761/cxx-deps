@@ -1,0 +1,7 @@
+{
+    "cmake.sourceDirectory": "E:/cxx-deps/any",
+    "files.associations": {
+        "utility": "cpp",
+        "shared_mutex": "cpp"
+    }
+}
