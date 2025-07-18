@@ -155,7 +155,7 @@ namespace rtpx {
 		if (itr != map.end())
 		{
 			char* endptr = nullptr;
-			return strtoull(itr->second.c_str(), &endptr, 16);
+			return (uint8_t)strtoull(itr->second.c_str(), &endptr, 16);
 		}
 
 		uint32_t id = profile_level_id();
@@ -174,7 +174,7 @@ namespace rtpx {
 		if (itr != map.end())
 		{
 			char* endptr = nullptr;
-			return strtoull(itr->second.c_str(), &endptr, 16);
+			return (uint16_t)strtoull(itr->second.c_str(), &endptr, 16);
 		}
 
 		uint32_t id = profile_level_id();

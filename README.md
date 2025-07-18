@@ -9,14 +9,19 @@
 -DCXX_DEPS=/you/cxx-deps/path
 -DCXX_BUILD=/you/cxx-build/path
 ```
-2. 包含需要的子项目
+
+2. 设置头文件目录
+```
+include_directories(${CXX_DEPS})
+```
+3. 包含需要的子项目
 ```
 add_subdirectory ("${CXX_DEPS}/sys2" "sys2")
 add_subdirectory ("${CXX_DEPS}/ssl" "http")
 add_subdirectory ("${CXX_DEPS}/rtpx" "rtpx")
 ```
 
-3. 在你的项目中引用它
+4. 在你的项目中引用它
 ```
 target_link_libraries(${PROJECT_NAME} PUBLIC
 	sys2

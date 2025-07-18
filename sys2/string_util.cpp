@@ -374,18 +374,18 @@ namespace sys {
 
 
 	bool string_util::is_valid_utf8(const std::string& str) {
-		int len = str.length();
-		int i = 0;
+		size_t len = str.length();
+		size_t i = 0;
 		while (i < len) {
 			unsigned char c = str[i];
-			int bytes = 0;
+			size_t bytes = 0;
 			if ((c & 0x80) == 0) bytes = 1;
 			else if ((c & 0xE0) == 0xC0) bytes = 2;
 			else if ((c & 0xF0) == 0xE0) bytes = 3;
 			else if ((c & 0xF8) == 0xF0) bytes = 4;
 			else return false;
 			if (i + bytes > len) return false;
-			for (int j = 1; j < bytes; ++j) {
+			for (size_t j = 1; j < bytes; ++j) {
 				if ((str[i + j] & 0xC0) != 0x80) return false;
 			}
 			i += bytes;

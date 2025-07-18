@@ -603,7 +603,10 @@ namespace rtpx
 		}
 		else if (msg_type == sctp_dcep_message_type::data_channel_ack)
 		{
-
+			if (on_stream_opened_)
+			{
+				on_stream_opened_(msg.stream_id);
+			}
 		}
 	}
 
