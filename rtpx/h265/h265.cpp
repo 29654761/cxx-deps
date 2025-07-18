@@ -7,7 +7,8 @@
 
 
 #include "h265.h"
-
+#include <stdlib.h>
+#include <string.h>
 
 void h265::fu_header_set(fu_header_t* fu, uint8_t v)
 {
@@ -168,4 +169,30 @@ bool h265::is_key_frame(const uint8_t* b, size_t s)
 bool h265::is_key_frame(nal_type_t t)
 {
     return t == nal_type_t::idr || t == nal_type_t::pps || t == nal_type_t::sps;
+}
+
+size_t h265::remove_emulation_prevention(uint8_t* nal, size_t size)
+{
+    uint8_t* nal_copy = (uint8_t*)malloc(size);
+    if (!nal_copy)
+        return size;
+
+    memcpy(nal_copy, nal, size);
+    size_t off = 0;
+    for (size_t i = 0; i < size;)
+    {
+        if (i + 2 < size && nal_copy[i] == 0x00 && nal_copy[i + 1] == 0x00 && nal_copy[i + 2] == 0x03)
+        {
+            nal[off++] = 0x00;
+            nal[off++] = 0x00;
+            i += 3;
+        }
+        else
+        {
+            nal[off++] = nal_copy[i++];
+        }
+    }
+
+    free(nal_copy);
+    return off;
 }

@@ -57,4 +57,6 @@ public:
 	static nal_type_t get_nal_type(uint8_t b);
 	static bool is_key_frame(uint8_t t);
 	static bool is_key_frame(nal_type_t t);
+
+	static size_t remove_emulation_prevention(uint8_t* nal, size_t size);
 };
