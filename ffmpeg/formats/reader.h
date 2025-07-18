@@ -32,9 +32,17 @@ namespace ffmpeg
 			/// <summary>
 			/// fmt: v4l2,dshow
 			/// vcodec:  ffmpeg -f dshow -list_options true -i video="Integrated Webcam_FHD"
+			/// ffmpeg -list_devices true -f dshow -i dummy
 			/// </summary>
 			bool open_video_device(const std::string& device_name, const std::string& fmt, int width, int height, int framerate, const std::string& vcodec);
 
+			/// <summary>
+			/// fmt: Linux: alsa, macOS: avfoundation, Windows: dshow
+			/// vcodec:  ffmpeg -f dshow -list_options true -i video="Integrated Webcam_FHD"
+			/// ffmpeg -list_devices true -f dshow -i dummy
+			/// </summary>
+			bool open_audio_device(const std::string& device_name, const std::string& fmt, int samplerate, int channels,int milliseconds);
+			
 			virtual void close();
 			virtual bool read_packet(AVPacket* pkt);
 

@@ -75,12 +75,29 @@ namespace ffmpeg
 			std::string fps = std::to_string(framerate);
 			av_dict_set(&options, "framerate", fps.c_str(), 0);
 
-			std::string video_size = std::to_string(width) + "x" + std::to_string(height);;
+			std::string video_size = std::to_string(width) + "x" + std::to_string(height);
 			av_dict_set(&options, "video_size", video_size.c_str(), 0);
 
 			av_dict_set(&options, "vcodec", vcodec.c_str(), 0);
 
 			std::string url = "video=" + device_name;
+			bool ret = open(url, fmt, options);
+
+			av_dict_free(&options);
+			return ret;
+		}
+
+		bool reader::open_audio_device(const std::string& device_name, const std::string& fmt, int samplerate, int channels,int milliseconds)
+		{
+			AVDictionary* options = nullptr;
+			av_dict_set_int(&options, "sample_rate", samplerate, 0);
+			av_dict_set_int(&options, "channels", channels, 0);
+			av_dict_set_int(&options, "sample_size", 16, 0);  //bits per sample
+			av_dict_set_int(&options, "audio_buffer_size", milliseconds, 0); //milliseconds
+			//std::string bit_rate_str = std::to_string(bit_rate);
+			//av_dict_set(&options, "bit_rate", bit_rate_str.c_str(), 0);
+
+			std::string url = "audio=" + device_name;
 			bool ret = open(url, fmt, options);
 
 			av_dict_free(&options);
