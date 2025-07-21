@@ -19,9 +19,9 @@ bool bit_reader::read_bits(size_t bit_count, uint32_t& val)
 	size_t old_bit_pos_ = bit_pos_;
 
 	val = 0;
-	for (int i = 0; i < bit_count; i++)
+	for (size_t i = 0; i < bit_count; i++)
 	{
-		val << 1;
+		val <<= 1;
 		if (byte_pos_ >= buffer_size_) 
 		{
 			byte_pos_ = old_byte_pos_;

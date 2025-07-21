@@ -12,7 +12,7 @@ namespace ffmpeg
 			{
 				codec_name_ = "h264_qsv";
 			}
-			else if (options_.codec_id = AVCodecID::AV_CODEC_ID_HEVC)
+			else if (options_.codec_id == AVCodecID::AV_CODEC_ID_HEVC)
 			{
 				codec_name_ = "hevc_qsv";
 			}

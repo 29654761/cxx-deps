@@ -90,15 +90,15 @@ namespace rtpx
 
 	protected:
 		proto_type_t detect_message(uint8_t b);
-		bool detect_rtcp_packet(const uint8_t* buffer, int size, rtcp_header& hdr);
+		bool detect_rtcp_packet(const uint8_t* buffer, size_t size, rtcp_header& hdr);
 
-		void handle_rtp_message(const uint8_t* buffer, int size, const asio::ip::udp::endpoint& endpoint);
+		void handle_rtp_message(const uint8_t* buffer, size_t size, const asio::ip::udp::endpoint& endpoint);
 		void handle_rtp_packet(packet_ptr packet, const asio::ip::udp::endpoint& endpoint);
-		void handle_rtcp_message(const uint8_t* buffer, int size,const rtcp_header& hdr, const asio::ip::udp::endpoint& endpoint);
-		void handle_dtls_message(const uint8_t* buffer, int size, const asio::ip::udp::endpoint& endpoint);
+		void handle_rtcp_message(const uint8_t* buffer, size_t size,const rtcp_header& hdr, const asio::ip::udp::endpoint& endpoint);
+		void handle_dtls_message(const uint8_t* buffer, size_t size, const asio::ip::udp::endpoint& endpoint);
 		void handle_dtls_completed(const asio::ip::udp::endpoint& ep);
-		void handle_app_message(const uint8_t* buffer, int size, const asio::ip::udp::endpoint& endpoint);
-		void handle_stun_message(const uint8_t* buffer, int size, const asio::ip::udp::endpoint& endpoint);
+		void handle_app_message(const uint8_t* buffer, size_t size, const asio::ip::udp::endpoint& endpoint);
+		void handle_stun_message(const uint8_t* buffer, size_t size, const asio::ip::udp::endpoint& endpoint);
 		void handle_stun_completed(const asio::ip::udp::endpoint& endpoint);
 
 		void handle_rtcp_app(const rtcp_app* app, const asio::ip::udp::endpoint& endpoint);

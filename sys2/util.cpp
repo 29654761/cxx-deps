@@ -12,12 +12,17 @@
 #include <string.h>
 #include <chrono>
 
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__)
 #include <unistd.h>
 #include <sys/prctl.h>
 #include <pthread.h>
 #include <sched.h>
 //#include "sys/sysinfo.h"
+#elif defined(__APPLE__)
+#include <pthread.h>
+
+//pthread_setname_np("your_thread_name");
+
 #elif _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>

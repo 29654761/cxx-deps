@@ -247,7 +247,7 @@ namespace rtpx
 		}
 	}
 
-	bool transport::detect_rtcp_packet(const uint8_t* buffer, int size, rtcp_header& hdr)
+	bool transport::detect_rtcp_packet(const uint8_t* buffer, size_t size, rtcp_header& hdr)
 	{
 		memset(&hdr, 0, sizeof(hdr));
 		int ptv = rtcp_header_parse(&hdr, (const uint8_t*)buffer, size);
@@ -271,7 +271,7 @@ namespace rtpx
 		return false;
 	}
 
-	void transport::handle_rtp_message(const uint8_t* buffer, int size, const asio::ip::udp::endpoint& endpoint)
+	void transport::handle_rtp_message(const uint8_t* buffer, size_t size, const asio::ip::udp::endpoint& endpoint)
 	{
 		rtcp_header hdr = {};
 		if (detect_rtcp_packet(buffer, size, hdr))
@@ -279,7 +279,8 @@ namespace rtpx
 #ifdef RTPX_SSL
 			if (srtp_in_)
 			{
-				srtp_err_status_t ret = srtp_unprotect_rtcp(srtp_in_, (void*)buffer, &size);
+				int srtp_size = (int)size;
+				srtp_err_status_t ret = srtp_unprotect_rtcp(srtp_in_, (void*)buffer, &srtp_size);
 				if (ret != srtp_err_status_ok)
 				{
 					if (log_)
@@ -288,6 +289,7 @@ namespace rtpx
 					}
 					return;
 				}
+				size = srtp_size;
 			}
 #endif
 			handle_rtcp_message(buffer, size,hdr,endpoint);
@@ -297,7 +299,8 @@ namespace rtpx
 #ifdef RTPX_SSL
 			if (srtp_in_)
 			{
-				srtp_err_status_t ret = srtp_unprotect(srtp_in_, (void*)buffer, &size);
+				int srtp_size = (int)size;
+				srtp_err_status_t ret = srtp_unprotect(srtp_in_, (void*)buffer, &srtp_size);
 				if (ret != srtp_err_status_ok)
 				{
 					if (log_)
@@ -306,6 +309,7 @@ namespace rtpx
 					}
 					return;
 				}
+				size = srtp_size;
 			}
 #endif
 			auto pkt = std::make_shared<packet>();
@@ -324,7 +328,7 @@ namespace rtpx
 		}
 	}
 
-	void transport::handle_rtcp_message(const uint8_t* buffer, int size, const rtcp_header& hdr, const asio::ip::udp::endpoint& endpoint)
+	void transport::handle_rtcp_message(const uint8_t* buffer, size_t size, const rtcp_header& hdr, const asio::ip::udp::endpoint& endpoint)
 	{
 		if (hdr.common.pt == rtcp_packet_type::RTCP_RR)
 		{
@@ -438,7 +442,7 @@ namespace rtpx
 		}
 	}
 
-	void transport::handle_dtls_message(const uint8_t* buffer, int size, const asio::ip::udp::endpoint& endpoint)
+	void transport::handle_dtls_message(const uint8_t* buffer, size_t size, const asio::ip::udp::endpoint& endpoint)
 	{
 #ifdef RTPX_SSL
 
@@ -562,7 +566,7 @@ namespace rtpx
 		}
 	}
 
-	void transport::handle_app_message(const uint8_t* buffer, int size, const asio::ip::udp::endpoint& endpoint)
+	void transport::handle_app_message(const uint8_t* buffer, size_t size, const asio::ip::udp::endpoint& endpoint)
 	{
 		std::lock_guard<std::recursive_mutex> lk(sctp_mutex_);
 		if (sctp_)
@@ -571,7 +575,7 @@ namespace rtpx
 		}
 	}
 
-	void transport::handle_stun_message(const uint8_t* buffer, int size, const asio::ip::udp::endpoint& endpoint)
+	void transport::handle_stun_message(const uint8_t* buffer, size_t size, const asio::ip::udp::endpoint& endpoint)
 	{
 		stun_message msg;
 		uint32_t fp = 0;

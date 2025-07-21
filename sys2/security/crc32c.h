@@ -1,6 +1,7 @@
 #ifndef __CRC32_H__
 #define __CRC32_H__
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus

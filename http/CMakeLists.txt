@@ -14,6 +14,7 @@ add_library (${PROJECT_NAME} STATIC ${SRCS})
 if(HYPERTEXT_CURL)
     include("${CXX_DEPS}/cmake/curl.cmake")
 endif()
+include("${CXX_DEPS}/cmake/openssl.cmake")
 
 if(HYPERTEXT_CURL)
     target_compile_definitions(${PROJECT_NAME} PUBLIC HYPERTEXT_CURL NOMINMAX)

@@ -52,7 +52,7 @@ namespace sys
 
     private:
         std::function<R(Args...)> func_;
-        std::shared_mutex mutex_;
+        mutable std::shared_mutex mutex_;
 
 
     };

@@ -106,7 +106,6 @@ namespace rtpx
 			return true;
 
 		this->remote_port_ = remote_port;
-		this->local_port_ = local_port_;
 
 		streams_.clear();
 
