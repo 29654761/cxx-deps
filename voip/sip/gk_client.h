@@ -74,6 +74,7 @@ namespace voip
 
 			voip_uri url_;
 			bool is_tcp_ = true;
+			std::string call_id_;
 
 			std::atomic<int64_t> updated_at_;
 			bool is_registered_ = false;

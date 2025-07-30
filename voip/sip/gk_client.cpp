@@ -24,7 +24,6 @@ namespace voip
 			if (active_)
 				return false;
 			active_ = true;
-
 			time_to_live_ = interval;
 			is_tcp_ = is_tcp;
 			url_.username = alias_;
@@ -202,6 +201,11 @@ namespace voip
 			std::vector<sip_via> vias;
 			vias.emplace_back(true, nat_address_, port, "", 0, endpoint::create_branch());
 			sip_message req=ep_->create_request("REGISTER", url_ ,cseq, from, to, &contact, vias, true);
+			if (call_id_.empty())
+			{
+				call_id_ = sys::util::random_string(32);
+			}
+			req.set_call_id(call_id_);
 			req.set_expires(time_to_live_);
 			if (cred)
 			{
@@ -249,6 +253,7 @@ namespace voip
 			{
 				req.set_authenticate(cred.to_string());
 			}
+			call_id_ = "";
 			return con->send_message(req);
 		}
 
@@ -270,13 +275,10 @@ namespace voip
 					cred.uri = url_.to_string();
 					cred.response = cred.digest("REGISTER", password_, nullptr, "");
 					set_credentials(cred);
-					
 					auto self = shared_from_this();
-					timer_.expires_after(std::chrono::milliseconds(0));
+					timer_.expires_after(std::chrono::milliseconds(1000));
 					timer_.async_wait(std::bind(&gk_client::handle_timer, this, self, std::placeholders::_1));
 				}
-				set_status(false);
-				return;
 			}
 			else if (status == "200")
 			{

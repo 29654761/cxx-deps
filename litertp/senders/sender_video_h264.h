@@ -23,6 +23,9 @@ namespace litertp
 
 	private:
 		void send_nal(uint32_t duration,const uint8_t* nal, uint32_t nal_size, bool islast);
+
+	private:
+		int packetization_mode_ = 0;
 	};
 
 

@@ -31,8 +31,11 @@ namespace voip
 
 		bool sip_call::add_audio_channel_g711()
 		{
+			std::string mid = audio_mid_;
+			if (mid.empty())
+				mid = "audio";
 			uint32_t ssrc = sys::util::random_number<uint32_t>(100000000, 999999999);
-			auto ms = rtp_.create_media_stream("audio", media_type_audio, ssrc, nat_address_.c_str(), rtp_ports_, false);
+			auto ms = rtp_.create_media_stream(mid, media_type_audio, ssrc, nat_address_.c_str(), rtp_ports_, false);
 			if (!ms) {
 				return false;
 			}
@@ -43,15 +46,18 @@ namespace voip
 
 		bool sip_call::add_video_channel_h264()
 		{
+			std::string mid = video_mid_;
+			if (mid.empty())
+				mid = "video";
 			uint32_t ssrc = sys::util::random_number<uint32_t>(100000000, 999999999);
-			auto ms=rtp_.create_media_stream("video", media_type_video, ssrc, nat_address_.c_str(), rtp_ports_, false);
+			auto ms=rtp_.create_media_stream(mid, media_type_video, ssrc, nat_address_.c_str(), rtp_ports_, false);
 			if (!ms) {
 				return false;
 			}
 			ms->use_rtp_address(true);
 			ms->add_local_video_track(codec_type_h264,96,90000,true);
 			litertp::fmtp fmtp;
-			fmtp.set_packetization_mode(1);
+			//fmtp.set_packetization_mode(1);
 			fmtp.set_profile_level_id(0x420028);
 			fmtp.set_mbps(245760);
 			fmtp.set_mfs(8192);
@@ -64,8 +70,11 @@ namespace voip
 
 		bool sip_call::add_video_channel_h265()
 		{
+			std::string mid = video_mid_;
+			if (mid.empty())
+				mid = "video";
 			uint32_t ssrc = sys::util::random_number<uint32_t>(100000000, 999999999);
-			auto ms = rtp_.create_media_stream("video", media_type_video, ssrc, nat_address_.c_str(), rtp_ports_, false);
+			auto ms = rtp_.create_media_stream(mid, media_type_video, ssrc, nat_address_.c_str(), rtp_ports_, false);
 			if (!ms) {
 				return false;
 			}
@@ -85,7 +94,10 @@ namespace voip
 
 		bool sip_call::add_extend_video_channel_h264()
 		{
-			auto ms = rtp_.create_application_stream("app", "UDP/BFCP", rtp_ports_);
+			std::string mid = video_mid_;
+			if (mid.empty())
+				mid = "video";
+			auto ms = rtp_.create_application_stream(mid, "UDP/BFCP", rtp_ports_);
 			if (!ms) {
 				return false;
 			}
@@ -449,10 +461,17 @@ namespace voip
 					std::string smsg = msg.msg();
 					log_->error("Device response failed: status={},message={}", status, smsg)->flush();
 				}
-				if (on_hangup)
+				
+				uint32_t seq = 0;
+				std::string method;
+				msg.get_cseq(seq, method);
+				if (method != "OPTIONS")
 				{
-					auto self = shared_from_this();
-					on_hangup(self, call::reason_code_t::error);
+					if (on_hangup)
+					{
+						auto self = shared_from_this();
+						on_hangup(self, call::reason_code_t::error);
+					}
 				}
 				return;
 			}

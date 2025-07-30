@@ -15,6 +15,7 @@ namespace litertp
 	sender_video_h264::sender_video_h264(uint8_t pt, uint32_t ssrc, media_type_t mt, const sdp_format& fmt)
 		:sender(pt,ssrc,mt,fmt)
 	{
+        packetization_mode_ = fmt.fmtp.packetization_mode();
 	}
 
 	sender_video_h264::~sender_video_h264()

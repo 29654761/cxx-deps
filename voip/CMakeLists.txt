@@ -23,10 +23,11 @@ else()
 endif()
 # TODO: 如有需要，请添加测试并安装目标。
 include(${CXX_DEPS}/cmake/opal.cmake)
-include(${CXX_DEPS}/cmake/asio.cmake)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE
+target_link_libraries(${PROJECT_NAME} PUBLIC
+    asio
     sip
     litertp
+    
 )
 

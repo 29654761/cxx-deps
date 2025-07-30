@@ -69,7 +69,7 @@ bool challenge::parse(const std::string& s, const std::string& prefix)
 		return false;
 	}
 
-	std::string s1 = s.substr(0, prefix.size() + 1);
+	std::string s1 = s.substr(skip);
 	auto ss = sys::string_util::split(s1, ",");
 	for (auto itr = ss.begin(); itr != ss.end(); itr++)
 	{
@@ -101,7 +101,7 @@ bool challenge::parse(const std::string& s, const std::string& prefix)
 		}
 		else if (key == "stale")
 		{
-			std::transform(val.begin(), kv[0].end(), kv[0].begin(), ::tolower);
+			std::transform(val.begin(),val.end(), val.begin(), ::tolower);
 			this->stale = val == "true";
 		}
 		else if (key == "opaque")

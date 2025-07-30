@@ -425,6 +425,11 @@ namespace litertp
 		for (auto& m : sdp.medias)
 		{
 			auto s=get_media_stream(m.mid);
+			if (!s)
+			{
+				s = get_media_stream(m.media_type);
+			}
+
 			if (s)
 			{
 				if (!s->has_remote_sdp())

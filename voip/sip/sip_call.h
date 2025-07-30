@@ -44,6 +44,8 @@ namespace voip
 
 			void set_gkclient(bool isgk) { is_gk_client_ = isgk; }
 
+			void set_video_mid(const std::string& mid) { video_mid_ = mid; }
+			void set_audio_mid(const std::string& mid) { audio_mid_ = mid; }
 		private:
 			bool add_audio_channel_g711();
 			bool add_video_channel_h264();
@@ -90,6 +92,8 @@ namespace voip
 
 			std::atomic<uint16_t> bfcp_transaction_id_;
 
+			std::string video_mid_;
+			std::string audio_mid_;
 		};
 
 

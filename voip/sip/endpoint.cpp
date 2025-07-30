@@ -733,6 +733,22 @@ namespace voip
 				call->set_gkclient(true);
 			}
 
+			litertp::sdp sdp;
+			if (sdp.parse(message.body))
+			{
+				for (auto m : sdp.medias)
+				{
+					if (m.media_type == media_type_audio) {
+						call->set_audio_mid(m.mid);
+					}
+					else if (m.media_type == media_type_video) {
+						call->set_video_mid(m.mid);
+					}
+				}
+			}
+
+			
+
 			set_call(call);
 			call->start(incoming_audio_, incoming_video_);
 		}
