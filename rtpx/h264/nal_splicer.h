@@ -5,6 +5,13 @@
 class nal_splicer
 {
 public:
+
+	struct nal_item_t
+	{
+		std::vector<uint8_t> nal;
+		uint32_t first_mbs = 0;
+	};
+
 	nal_splicer();
 	~nal_splicer();
 
@@ -14,6 +21,6 @@ public:
 private:
 	std::vector<uint8_t> combin();
 private:
-	std::vector<std::vector<uint8_t>> nals_;
+	std::vector<nal_item_t> nals_;
 };
 

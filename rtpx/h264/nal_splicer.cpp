@@ -1,6 +1,7 @@
 #include "nal_splicer.h"
 #include "h264.h"
 #include "bit_reader.h"
+#include <algorithm>
 
 nal_splicer::nal_splicer()
 {
@@ -54,17 +55,25 @@ void nal_splicer::insert_nal(const uint8_t* nal, size_t size, std::vector<std::v
 			nals_.clear();
 		}
 
-		nals_.push_back(new_nal);
+		nal_item_t item;
+		item.first_mbs = first_mbs;
+		item.nal = std::move(new_nal);
+
+		nals_.push_back(item);
 	}
 }
 
 
 std::vector<uint8_t> nal_splicer::combin()
 {
+	std::sort(nals_.begin(), nals_.end(), [](const nal_item_t& a, const nal_item_t& b) {
+		return a.first_mbs < b.first_mbs;
+	});
+
 	std::vector<uint8_t> frame;
-	for (auto& nal : nals_)
+	for (auto& item : nals_)
 	{
-		frame.insert(frame.end(), nal.begin(), nal.end());
+		frame.insert(frame.end(), item.nal.begin(), item.nal.end());
 	}
 	return frame;
 }

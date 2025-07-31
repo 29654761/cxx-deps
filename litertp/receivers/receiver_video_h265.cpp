@@ -293,40 +293,41 @@ namespace litertp
 				size_t size = payload_size - skip_nal_data;
 				fu_frame_data.append((const char*)buf, size);
 
+				if (fuh.e == 1)
+				{
+					if (fu_frame_data.size() > 0)
+					{
+						av_frame_t frame;
+						memset(&frame, 0, sizeof(frame));
+						frame.ct = codec_type_h264;
+						frame.mt = media_type_video;
+						frame.pts = first_pkt->handle_->header->ts;
+						frame.dts = frame.pts;
+						frame.data = (uint8_t*)fu_frame_data.data();
+						frame.data_size = (uint32_t)fu_frame_data.size();
+
+						h265::nal_header_t nalh = { 0 };
+						h265::nal_header_set(&nalh, frame.data + 4, frame.data_size - 4);
+						if (h265::is_key_frame((h265::nal_type_t)nalh.type))
+						{
+							waiting_for_keyframe_ = false;
+						}
+
+						if (!waiting_for_keyframe_)
+						{
+							invoke_rtp_frame(frame);
+							stats_.frames_received++;
+						}
+						else
+						{
+							stats_.frames_droped++;
+						}
+					}
+				}
 			}
 			else
 			{
 				return false;
-			}
-		}
-
-
-		if (fu_frame_data.size() > 0)
-		{
-			av_frame_t frame;
-			memset(&frame, 0, sizeof(frame));
-			frame.ct = codec_type_h264;
-			frame.mt = media_type_video;
-			frame.pts = first_pkt->handle_->header->ts;
-			frame.dts = frame.pts;
-			frame.data = (uint8_t*)fu_frame_data.data();
-			frame.data_size = (uint32_t)fu_frame_data.size();
-
-			h265::nal_header_t nalh = { 0 };
-			h265::nal_header_set(&nalh, frame.data + 4, frame.data_size - 4);
-			if (h265::is_key_frame((h265::nal_type_t)nalh.type))
-			{
-				waiting_for_keyframe_ = false;
-			}
-
-			if (!waiting_for_keyframe_)
-			{
-				invoke_rtp_frame(frame);
-				stats_.frames_received++;
-			}
-			else
-			{
-				stats_.frames_droped++;
 			}
 		}
 
