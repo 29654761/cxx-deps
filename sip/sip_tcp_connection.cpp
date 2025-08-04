@@ -79,7 +79,7 @@ void sip_tcp_connection::stop()
 	if (socket_)
 	{
 		std::error_code ec;
-		socket_->cancel(ec);
+		socket_->close(ec);
 		//std::string err = ec.message();
 	}
 	//recv_ring_buffer_.clear();

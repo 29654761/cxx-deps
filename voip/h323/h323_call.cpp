@@ -151,6 +151,7 @@ namespace voip
 
 		bool h323_call::start(bool audio, bool video)
 		{
+			std::lock_guard<std::recursive_mutex> lk(mutex_);
 			bool experted = false;
 			if(!active_.compare_exchange_strong(experted, true))
 				return true;
@@ -235,6 +236,7 @@ namespace voip
 
 		void h323_call::stop(voip::call::reason_code_t reason)
 		{
+			std::lock_guard<std::recursive_mutex> lk(mutex_);
 			bool experted = true;
 			if (!active_.compare_exchange_strong(experted, false))
 				return;
@@ -261,7 +263,7 @@ namespace voip
 			{
 				this->send_release_complete(H225_ReleaseCompleteReason::Choices::e_undefinedReason, false);
 				std::this_thread::sleep_for(std::chrono::milliseconds(500));
-				h225_skt_->cancel(ec);
+				h225_skt_->close(ec);
 			}
 			if (on_destroy)
 			{

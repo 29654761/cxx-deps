@@ -65,6 +65,10 @@ namespace ffmpeg
 			snprintf(args, 511, "video_size=%dx%d:pix_fmt=%d:time_base=1/20:pixel_aspect=1/1", width, height, (int)format);
 
 			const AVFilter* buffer = avfilter_get_by_name("buffer");
+			if(!buffer)
+			{
+				return false;
+			}
 			int r = avfilter_graph_create_filter(&in_filter_, buffer, "in", args, NULL, filter_graph_);
 			if (r < 0)
 			{
@@ -80,6 +84,10 @@ namespace ffmpeg
 		bool filters::add_out_buffer()
 		{
 			const AVFilter* buffersink = avfilter_get_by_name("buffersink");
+			if(!buffersink)
+			{
+				return false;
+			}
 			int r = avfilter_graph_create_filter(&out_filter_, buffersink, "out", NULL, NULL, filter_graph_);
 			if (r < 0)
 			{
@@ -93,14 +101,14 @@ namespace ffmpeg
 				return false;
 			}
 
-			pre_filter_ = out_filter_;
-
 			r = avfilter_graph_config(filter_graph_, nullptr);
 			if (r < 0)
 			{
 				avfilter_free(out_filter_);
 				return false;
 			}
+
+			pre_filter_ = out_filter_;
 
 			return true;
 		}
@@ -110,6 +118,10 @@ namespace ffmpeg
 		{
 			AVFilterContext* filter = nullptr;
 			const AVFilter* hflip = avfilter_get_by_name("hflip");
+			if(!hflip)
+			{
+				return false;
+			}
 			int r = avfilter_graph_create_filter(&filter, hflip, "hflip", nullptr, nullptr, filter_graph_);
 			if (r < 0)
 			{
@@ -131,6 +143,10 @@ namespace ffmpeg
 		{
 			AVFilterContext* filter = nullptr;
 			const AVFilter* vflip = avfilter_get_by_name("vflip");
+			if(!vflip)
+			{
+				return false;
+			}
 			int r = avfilter_graph_create_filter(&filter, vflip, "vflip", nullptr, nullptr, filter_graph_);
 			if (r < 0)
 			{
@@ -158,8 +174,12 @@ namespace ffmpeg
 			//snprintf(args, 511, "x=(W-w)/2:y=(H-h)/2:repeatlast=1"); // center
 
 			AVFilterContext* filter = nullptr;
-			const AVFilter* vflip = avfilter_get_by_name("overlay");
-			int r = avfilter_graph_create_filter(&filter, vflip, "overlay", args, nullptr, filter_graph_);
+			const AVFilter* overlay = avfilter_get_by_name("overlay");
+			if(!overlay)
+			{
+				return false;
+			}
+			int r = avfilter_graph_create_filter(&filter, overlay, "overlay", args, nullptr, filter_graph_);
 			if (r < 0)
 			{
 				return false;
@@ -182,8 +202,12 @@ namespace ffmpeg
 			snprintf(args, 511, "dir=%d:passthrough=%s", dir, passthrough);
 
 			AVFilterContext* filter = nullptr;
-			const AVFilter* vflip = avfilter_get_by_name("transpose");
-			int r = avfilter_graph_create_filter(&filter, vflip, "transpose", args, nullptr, filter_graph_);
+			const AVFilter* transpose = avfilter_get_by_name("transpose");
+			if(!transpose)
+			{
+				return false;
+			}
+			int r = avfilter_graph_create_filter(&filter, transpose, "transpose", args, nullptr, filter_graph_);
 			if (r < 0)
 			{
 				return false;

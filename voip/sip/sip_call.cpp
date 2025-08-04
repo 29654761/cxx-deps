@@ -116,6 +116,7 @@ namespace voip
 
 		bool sip_call::start(bool audio,bool video)
 		{
+			std::lock_guard<std::recursive_mutex> lk(mutex_);
 			bool experted = false;
 			if (!active_.compare_exchange_strong(experted, true))
 				return true;
@@ -207,6 +208,7 @@ namespace voip
 
 		void sip_call::stop(voip::call::reason_code_t reason)
 		{
+			std::lock_guard<std::recursive_mutex> lk(mutex_);
 			bool experted = true;
 			if (!active_.compare_exchange_strong(experted, false))
 				return;
@@ -693,7 +695,10 @@ namespace voip
 			got_ack = true;
 			auto self = shared_from_this();
 
-			invoke_connected();
+			if (msg.status() == "200") 
+			{
+				invoke_connected();
+			}
 			return con->send_message(req);
 		}
 
