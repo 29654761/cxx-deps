@@ -15,7 +15,7 @@ extern "C" {
 
 #include "avtypes.h"
 
-#define MAX_RTP_PAYLOAD_SIZE 1200
+#define MAX_RTP_PAYLOAD_SIZE 1400
 #define PACKET_BUFFER_SIZE 512
 
 	typedef enum sdp_type_t
