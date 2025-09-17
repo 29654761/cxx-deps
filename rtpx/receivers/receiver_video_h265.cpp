@@ -173,7 +173,7 @@ namespace rtpx
 			}
 			av_frame_t frame;
 			memset(&frame, 0, sizeof(frame));
-			frame.ct = codec_type_h264;
+			frame.ct = codec_type_h265;
 			frame.mt = media_type_video;
 			if (fui.type < 48)
 			{
@@ -300,7 +300,7 @@ namespace rtpx
 					{
 						av_frame_t frame;
 						memset(&frame, 0, sizeof(frame));
-						frame.ct = codec_type_h264;
+						frame.ct = codec_type_h265;
 						frame.mt = media_type_video;
 						frame.pts = first_pkt->header()->ts;
 						frame.dts = frame.pts;

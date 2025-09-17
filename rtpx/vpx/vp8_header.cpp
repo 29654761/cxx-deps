@@ -1,12 +1,12 @@
 /**
- * @file vpx_header.cpp
+ * @file vp8_header.cpp
  * @brief
  * @author Shijie Zhou
  * @copyright 2024 Shijie Zhou
  */
 
 
-#include "vpx_header.h"
+#include "vp8_header.h"
 #include <string.h>
 
 
@@ -32,23 +32,22 @@ int vp8_header_deserialize(vp8_header* hdr, int* header_size, const uint8_t* buf
 	{
 		if (hdr->startof_vp8_partition == 1 && hdr->part_index == 0)
 		{
-			CHECK_SIZE(size, pos+3);
+			CHECK_SIZE(size, pos + 3);
+			uint8_t b0 = buffer[pos++];
+			uint8_t b1 = buffer[pos++];
+			uint8_t b2 = buffer[pos++];
 
-			v = buffer[pos++];
+			hdr->h = (b0 & 0x10) >> 4;
+			hdr->version = (b0 & 0x0E) >> 1;
+			hdr->p = (b0 & 0x01);
 
-			hdr->h = (v & 0x10) >> 4;
-			hdr->version= (v & 0x0E) >> 1;
-			hdr->p= (v & 0x01);
-
-			hdr->first_partition_size = (((uint32_t)(v & 0xE0)) << 11);
-			hdr->first_partition_size |= (buffer[pos++] << 8);
-			hdr->first_partition_size |= buffer[pos++];
+			hdr->first_partition_size = (b0 | (b1 << 8) | (b2 << 16)) >> 5;
 		}
 		return pos;
 	}
 	else
 	{
-		*header_size = 2;
+		(*header_size)++;
 		CHECK_SIZE(size, pos + 1);
 
 		v = buffer[pos++];
@@ -65,17 +64,17 @@ int vp8_header_deserialize(vp8_header* hdr, int* header_size, const uint8_t* buf
 			CHECK_SIZE(size, pos + 1);
 			uint8_t v0 = buffer[pos++];
 			hdr->pic_idx_len = (v0 & 0x80) >> 7;
+			(*header_size)++;
 			if (hdr->pic_idx_len == 0)
 			{
 				hdr->pic_idx = (v0 & 0x7F);
-				*header_size = 3;
 			}
 			else
 			{
 				CHECK_SIZE(size, pos + 1);
 				uint8_t v1 = buffer[pos++];
 				hdr->pic_idx = (((uint16_t)(v0 & 0x7F)) << 8) | v1;
-				*header_size = 4;
+				(*header_size)++;
 			}
 
 		}
@@ -84,30 +83,32 @@ int vp8_header_deserialize(vp8_header* hdr, int* header_size, const uint8_t* buf
 		{
 			CHECK_SIZE(size, pos + 1);
 			hdr->tl0_pic_idx = buffer[pos++];
+			(*header_size)++;
 		}
 
 		//=====
-		if (hdr->key_idx_present != 0)
+		if (hdr->tid_present != 0||hdr->key_idx_present != 0)
 		{
 			CHECK_SIZE(size, pos + 1);
 			v = buffer[pos++];
 			hdr->tid = (v & 0xC0) >> 6;
 			hdr->layer = (v & 0x20) >> 5;
 			hdr->key_idx = (v & 0x1F);
+			(*header_size)++;
 		}
 
 		if (hdr->startof_vp8_partition == 1 && hdr->part_index == 0)
 		{
 			CHECK_SIZE(size, pos + 3);
-			v = buffer[pos++];
+			uint8_t b0 = buffer[pos++];
+			uint8_t b1 = buffer[pos++];
+			uint8_t b2 = buffer[pos++];
 
-			hdr->h = (v & 0x10) >> 4;
-			hdr->version = (v & 0x0E) >> 1;
-			hdr->p = (v & 0x01);
-
-			hdr->first_partition_size = (((uint32_t)(v & 0xE0)) << 11);
-			hdr->first_partition_size |= (buffer[pos++] << 8);
-			hdr->first_partition_size |= buffer[pos++];
+			hdr->h = (b0 & 0x10) >> 4;
+			hdr->version = (b0 & 0x0E) >> 1;
+			hdr->p = (b0 & 0x01);
+			
+			hdr->first_partition_size = (b0 | (b1 << 8) | (b2 << 16)) >> 5;
 		}
 		return pos;
 	}
@@ -123,7 +124,7 @@ int vp8_header_serialize(const vp8_header* hdr, int* header_size, uint8_t* buffe
 	//v |= (hdr->reserved&0x01) << 6;
 	v |= (hdr->non_reference & 0x01) << 5;
 	v |= (hdr->startof_vp8_partition & 0x01) << 4;
-	v |= (hdr->startof_vp8_partition & 0x0F);
+	v |= (hdr->part_index & 0x0F);
 
 	CHECK_SIZE(size, pos + 1);
 	buffer[pos++] = v;
@@ -137,11 +138,11 @@ int vp8_header_serialize(const vp8_header* hdr, int* header_size, uint8_t* buffe
 			v0 |= hdr->h << 4;
 			v0 |= hdr->version << 1;
 			v0 |= hdr->p;
-			v0 |= (uint8_t)((hdr->first_partition_size & 0x00070000) >> 11);
+			v0 |= (uint8_t)((hdr->first_partition_size & 0x7)<<5);
 			buffer[pos++] = v0;
 
-			v1 = (uint8_t)((hdr->first_partition_size & 0x0000FF00) >> 8);
-			v2 = (uint8_t)(hdr->first_partition_size & 0x000000FF);
+			v1 = (uint8_t)((hdr->first_partition_size & 0x000007F8) >> 3);
+			v2 = (uint8_t)((hdr->first_partition_size & 0x0007F800)>>11);
 			buffer[pos++] = v1;
 			buffer[pos++] = v2;
 		}
@@ -149,7 +150,7 @@ int vp8_header_serialize(const vp8_header* hdr, int* header_size, uint8_t* buffe
 	}
 	else
 	{
-		*header_size = 2;
+		(*header_size)++;
 		//======================
 		v = 0;
 		v |= hdr->pic_idx_present << 7;
@@ -162,9 +163,9 @@ int vp8_header_serialize(const vp8_header* hdr, int* header_size, uint8_t* buffe
 		//======================
 		if (hdr->pic_idx_present != 0)
 		{
+			(*header_size)++;
 			if (hdr->pic_idx_len == 0)
 			{
-				*header_size = 3;
 				CHECK_SIZE(size, pos + 1);
 
 				buffer[pos] |= hdr->pic_idx_len << 7;
@@ -173,7 +174,7 @@ int vp8_header_serialize(const vp8_header* hdr, int* header_size, uint8_t* buffe
 			}
 			else
 			{
-				*header_size = 4;
+				(*header_size)++;
 				CHECK_SIZE(size, pos + 2);
 
 				buffer[pos] |= hdr->pic_idx_len << 7;
@@ -188,15 +189,17 @@ int vp8_header_serialize(const vp8_header* hdr, int* header_size, uint8_t* buffe
 		{
 			CHECK_SIZE(size, pos + 1);
 			buffer[pos++] = hdr->tl0_pic_idx;
+			(*header_size)++;
 		}
 		//======================
-		if (hdr->key_idx_present != 0)
+		if (hdr->tid_present!=0||hdr->key_idx_present != 0)
 		{
 			v = 0;
 			v |= hdr->tid << 6;
 			v |= (hdr->layer & 0x01) << 5;
 			v |= (hdr->key_idx & 0x0F);
 			buffer[pos++] = v;
+			(*header_size)++;
 		}
 		//======================
 
@@ -207,10 +210,11 @@ int vp8_header_serialize(const vp8_header* hdr, int* header_size, uint8_t* buffe
 			v0 |= hdr->h << 4;
 			v0 |= hdr->version << 1;
 			v0 |= hdr->p;
-			v0 |= (uint8_t)((hdr->first_partition_size & 0x00070000) >> 11);
+			v0 |= (uint8_t)((hdr->first_partition_size & 0x7) << 5);
+			buffer[pos++] = v0;
 
-			v1 = (uint8_t)((hdr->first_partition_size & 0x0000FF00) >> 8);
-			v2 = (uint8_t)(hdr->first_partition_size & 0x000000FF);
+			v1 = (uint8_t)((hdr->first_partition_size & 0x000007F8) >> 3);
+			v2 = (uint8_t)((hdr->first_partition_size & 0x0007F800) >> 11);
 			buffer[pos++] = v1;
 			buffer[pos++] = v2;
 		}
@@ -221,3 +225,7 @@ int vp8_header_serialize(const vp8_header* hdr, int* header_size, uint8_t* buffe
 
 }
 
+bool vp8_is_keyframe(const vp8_header* hdr)
+{
+	return hdr->startof_vp8_partition == 1 && hdr->part_index == 0 && hdr->p == 0;
+}
