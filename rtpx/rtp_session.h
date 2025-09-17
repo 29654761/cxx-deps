@@ -24,7 +24,7 @@ namespace rtpx {
 	public:
 		typedef std::function<void()> connected_handler;
 		typedef std::function<void()> disconnected_handler;
-		typedef std::function<void(const std::string&, const sdp_format&, const av_frame_t&)> frame_handler;
+		typedef std::function<void(const std::string&, const std::string&, const std::string&, const sdp_format&, const av_frame_t&)> frame_handler;
 		typedef std::function<void(const std::string&)> send_require_keyframe_handler;
 		typedef std::function<void(const std::string&)> receive_require_keyframe_handler;
 		typedef std::function<void(const std::string&)> data_channel_opened_handler;
@@ -86,7 +86,7 @@ namespace rtpx {
 		void handle_timer(const std::error_code& ec);
 
 	protected:
-		void handle_ms_frame(const std::string& mid, const sdp_format& fmt, const av_frame_t& frame);
+		void handle_ms_frame(const std::string& mid, const std::string& sid, const std::string& tid, const sdp_format& fmt, const av_frame_t& frame);
 		void handle_ms_request_keyframe(const std::string& mid);
 
 		void handle_sctp_connected(uint16_t local_port);

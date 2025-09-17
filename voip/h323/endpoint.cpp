@@ -163,7 +163,7 @@ namespace voip
 			timer_.cancel(ec);
 		}
 
-		bool endpoint::start_gk_client(const PString& ras_address, WORD ras_port, const PString& alias, const PString& username, const PString& password)
+		bool endpoint::start_gk_client(const PString& ras_address, WORD ras_port, const PString& alias, const PString& username, const PString& password, bool h460_nat)
 		{
 			auto gkclient = get_gkclient();
 			if (gkclient)
@@ -175,7 +175,7 @@ namespace voip
 			gkclient->set_logger(log_);
 			gkclient->set_incoming_call_event(std::bind(&endpoint::handle_gk_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 			gkclient->set_status_event(std::bind(&endpoint::handle_gk_status, this, self, std::placeholders::_1, std::placeholders::_2));
-			if (!gkclient->start(ras_address, ras_port))
+			if (!gkclient->start(ras_address, ras_port,0,30, h460_nat))
 			{
 				return false;
 			}
@@ -210,6 +210,8 @@ namespace voip
 
 		call_ptr endpoint::make_call(const std::string& url, const std::string& local_alias, const std::string& call_id, const std::string& conf_id, int call_ref)
 		{
+			if (!active_)
+				return nullptr;
 			voip_uri purl;
 			purl.parse(url);
 			purl.scheme = "h323";
@@ -240,7 +242,7 @@ namespace voip
 			auto h245 = this->h245_ports();
 			auto rtp = this->rtp_ports();
 			auto callptr=std::make_shared<voip::h323::h323_call>(self,ep, alias,"", voip::call::direction_t::outgoing, nat, port, h245, rtp);
-			callptr->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
+			callptr->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6));
 			callptr->set_on_destroy(std::bind(&endpoint::handle_destroy_call,this,self,std::placeholders::_1,std::placeholders::_2));
 			callptr->set_logger(log_);
 			callptr->setup(purl,call_id,conf_id,call_ref);
@@ -322,7 +324,7 @@ namespace voip
 				auto rtp = rtp_ports();
 				auto callptr = std::make_shared<voip::h323::h323_call>(self, sktptr, alias,"", voip::call::direction_t::incoming, nat, port_, h245, rtp);
 				callptr->set_logger(log_);
-				callptr->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
+				callptr->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6));
 				callptr->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1,std::placeholders::_2));
 				callptr->set_max_bitrate(max_bitrate());
 				callptr->set_on_facility_event(std::bind(&endpoint::handle_facility, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
@@ -360,11 +362,11 @@ namespace voip
 		}
 
 		void endpoint::handle_incoming_call(endpoint_ptr self, call_ptr call,const std::string& local_alias, const std::string& remote_alias,
-			const std::string& remote_addr, int remote_port)
+			const std::string& remote_addr, int remote_port,bool reg)
 		{
 			if (on_incoming_call)
 			{
-				on_incoming_call(call, local_alias, remote_alias, remote_addr, remote_port);
+				on_incoming_call(call, local_alias, remote_alias, remote_addr, remote_port,reg);
 			}
 		}
 
@@ -613,7 +615,7 @@ namespace voip
 			auto callptr = std::make_shared<voip::h323::h323_call>(self,skt, (const std::string&)alias,"", voip::call::direction_t::outgoing, (const std::string&)nat, port_, h245, rtp);
 			callptr->set_max_bitrate(max_bitrate());
 			callptr->set_logger(log_);
-			callptr->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
+			callptr->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6));
 			callptr->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1,std::placeholders::_2));
 			voip_uri url;
 			url.scheme = "h323";

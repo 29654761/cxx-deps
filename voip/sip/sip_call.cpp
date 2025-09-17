@@ -173,18 +173,10 @@ namespace voip
 				sip_address contact = invite_.contact();
 				sip_address from = invite_.from();
 
-				remote_alias_ = from.display;
+				remote_alias_ = from.url.username;
 				if (remote_alias_.empty())
 				{
-					remote_alias_ = from.url.username;
-					if (remote_alias_.empty())
-					{
-						remote_alias_ = contact.display;
-						if (remote_alias_.empty())
-						{
-							remote_alias_ = contact.url.username;
-						}
-					}
+					remote_alias_ = contact.display;
 				}
 
 				std::string remote_addr = contact.url.host;
@@ -194,7 +186,7 @@ namespace voip
 
 				if (on_incoming_call)
 				{
-					on_incoming_call(self, local_alias_, remote_alias_, remote_addr, remote_port);
+					on_incoming_call(self, local_alias_, remote_alias_, remote_addr, remote_port, is_gk_client_);
 				}
 			}
 
@@ -261,6 +253,7 @@ namespace voip
 			invite.to().get("tag", my_tag_);
 			url_.parse(invite_.url());
 
+			invite_.headers.get("Record-Route", record_route_);
 			return true;
 		}
 
@@ -275,6 +268,10 @@ namespace voip
 					auto rsp = ep_->create_response(invite_, nullptr,true);
 					rsp.set_status("400");
 					rsp.set_msg("BadRequest");
+					for(auto itr=record_route_.begin();itr!=record_route_.end();itr++)
+					{
+						rsp.headers.add("Record-Route", *itr);
+					}
 					con->send_message(rsp);
 				}
 				return false;
@@ -339,7 +336,6 @@ namespace voip
 			auto con = get_con();
 			if (!con)
 				return false;
-
 			con->send_message(rsp);
 			return true;
 		}
@@ -371,10 +367,10 @@ namespace voip
 			sip_address remote_contact;
 			if (msg.contact(remote_contact))
 			{
-				remote_alias_ = remote_contact.display;
+				remote_alias_ = remote_contact.url.username;
 				if (remote_alias_.empty())
 				{
-					remote_alias_ = remote_contact.url.username;
+					remote_alias_ = remote_contact.display;
 				}
 			}
 
@@ -400,6 +396,10 @@ namespace voip
 				sip_address contact;
 				make_contact(contact);
 				auto rsp = ep_->create_response(msg, &contact,false);
+				for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+				{
+					rsp.headers.add("Record-Route", *itr);
+				}
 				con->send_message(rsp);
 			}
 		}
@@ -411,6 +411,10 @@ namespace voip
 			if (con)
 			{
 				auto rsp = ep_->create_response(msg, nullptr, false);
+				for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+				{
+					rsp.headers.add("Record-Route", *itr);
+				}
 				con->send_message(rsp);
 				auto self = shared_from_this();
 			}
@@ -428,6 +432,10 @@ namespace voip
 			if (con)
 			{
 				auto rsp = ep_->create_response(msg, nullptr, false);
+				for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+				{
+					rsp.headers.add("Record-Route", *itr);
+				}
 				con->send_message(rsp);
 				auto self = shared_from_this();
 				ack(msg);
@@ -446,6 +454,10 @@ namespace voip
 			if (con)
 			{
 				auto rsp = ep_->create_response(msg, nullptr, false);
+				for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+				{
+					rsp.headers.add("Record-Route", *itr);
+				}
 				con->send_message(rsp);
 			}
 		}
@@ -483,13 +495,13 @@ namespace voip
 				sip_address remote_contact;
 				if (msg.contact(remote_contact))
 				{
-					remote_alias_ = remote_contact.display;
+					remote_alias_ = remote_contact.url.username;
 					if (remote_alias_.empty())
 					{
-						remote_alias_ = remote_contact.url.username;
+						remote_alias_ = remote_contact.display;
 					}
 				}
-
+				msg.headers.get("Record-Route", record_route_);
 
 				litertp::sdp sdp;
 				if (sdp.parse(msg.body))
@@ -565,17 +577,21 @@ namespace voip
 
 			sip_address contact;
 			make_contact(contact);
-			sip_message req = ep_->create_response(invite, &contact,true);
+			sip_message rsp = ep_->create_response(invite, &contact,true);
 
 			sip_address to = invite.to();
 			to.set("tag", my_tag_);
-			req.set_to(to);
-			req.set_call_id(call_id_);
-			req.set_status("200");
-			req.set_msg("OK");
-			req.set_body(sdp);
-			req.set_content_type("application/sdp");
-			return con->send_message(req);
+			rsp.set_to(to);
+			rsp.set_call_id(call_id_);
+			rsp.set_status("200");
+			rsp.set_msg("OK");
+			rsp.set_body(sdp);
+			rsp.set_content_type("application/sdp");
+			for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+			{
+				rsp.headers.add("Record-Route", *itr);
+			}
+			return con->send_message(rsp);
 		}
 
 		bool sip_call::bye()
@@ -627,7 +643,10 @@ namespace voip
 
 			sip_message req = ep_->create_request("BYE", url, cseq, from, to,&contact, vias, false);
 			req.set_call_id(call_id_);
-
+			for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+			{
+				req.headers.add("Route", *itr);
+			}
 			std::string scseq = std::to_string(cseq);
 
 			return con->send_message(req);
@@ -653,15 +672,19 @@ namespace voip
 
 			sip_address contact;
 			make_contact(contact);
-			sip_message req = ep_->create_response(invite, &contact,true);
+			sip_message rsp = ep_->create_response(invite, &contact,true);
 			my_tag_ = endpoint::create_branch();
 			sip_address to = invite.to();
 			to.set("tag", my_tag_);
-			req.set_to(to);
-			req.set_call_id(call_id_);
-			req.set_status("180");
-			req.set_msg("Ringing");
-			return con->send_message(req);
+			rsp.set_to(to);
+			rsp.set_call_id(call_id_);
+			rsp.set_status("180");
+			rsp.set_msg("Ringing");
+			for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+			{
+				rsp.headers.add("Record-Route", *itr);
+			}
+			return con->send_message(rsp);
 		}
 
 		bool sip_call::ack(const sip_message& msg)
@@ -691,6 +714,10 @@ namespace voip
 			req.set_call_id(call_id_);
 			req.set_from(msg.from());
 			req.set_to(msg.to());
+			for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+			{
+				req.headers.add("Route", *itr);
+			}
 
 			got_ack = true;
 			auto self = shared_from_this();

@@ -45,7 +45,7 @@ namespace rtpx {
 			pack_stuffing_length = (buffer[pos] & 0x07);
 			pos++;
 
-			if (pack_stuffing_length + 12 > size) {
+			if (pack_stuffing_length + 12 > (int)size) {
 				return 0;
 			}
 

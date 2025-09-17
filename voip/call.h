@@ -58,7 +58,7 @@ namespace voip
 		typedef std::function<void(call_ptr, reason_code_t)> on_hangup_t;
 		typedef std::function<void(call_ptr, const std::string&,const std::string&)> on_connected_t;
 		typedef std::function<void(voip::call_ptr call, const std::string& called_alias, const std::string& remote_alias,
-			const std::string& remote_addr, int remote_port)> on_incoming_call_t;
+			const std::string& remote_addr, int remote_port,bool reg)> on_incoming_call_t;
 		typedef std::function<void(call_ptr, bool, bool)> on_presentation_role_changed_t;
 
 		call(const std::string& local_alias,const std::string& remote_alias, direction_t direction,

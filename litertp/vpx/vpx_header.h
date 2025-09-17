@@ -46,7 +46,7 @@
 /// </summary>
 typedef struct _vp8_header
 {
-	uint8_t extended_present : 1;				//1b  1 for has OPTIONAL£¨X,I,L,TK£©
+	uint8_t extended_present : 1;				//1b  1 for has OPTIONAL X,I,L,TK
 	uint8_t reserved : 1;						//1b
 	uint8_t non_reference : 1;					//1b
 	uint8_t startof_vp8_partition : 1;			//1b
@@ -67,9 +67,11 @@ typedef struct _vp8_header
 	uint8_t layer : 1;							//1b
 	uint8_t key_idx : 5;						//5 bits temporal key frame index.
 
-	uint8_t h:1;								
+
+	//This 3 bytes is not Payload Descriptor
+	uint8_t h:1;				 
 	uint8_t version : 3;
-	uint8_t p : 1;					//1b key frame
+	uint8_t p : 1;					//1b  0-key frame; 1-inter-frame
 	uint32_t first_partition_size : 19;
 }vp8_header;
 
@@ -82,3 +84,4 @@ typedef struct _vp8_header
 
 int vp8_header_deserialize(vp8_header* hdr,int* header_size, const uint8_t* buffer,int size);
 int vp8_header_serialize(const vp8_header* hdr, int* header_size, uint8_t* buffer, int size);
+bool vp8_is_keyframe(const vp8_header* hdr);

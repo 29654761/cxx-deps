@@ -27,7 +27,7 @@ namespace rtpx {
 	{
 	public:
 
-		typedef std::function<void(const std::string&, const sdp_format&, const av_frame_t&)> frame_handler;
+		typedef std::function<void(const std::string&, const std::string&, const std::string&, const sdp_format&, const av_frame_t&)> frame_handler;
 		typedef std::function<void(const std::string&)> send_require_keyframe_handler;
 		typedef std::function<void(const std::string&)> receive_require_keyframe_handler;
 

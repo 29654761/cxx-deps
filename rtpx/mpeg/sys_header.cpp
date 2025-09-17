@@ -37,7 +37,7 @@ namespace rtpx {
 			pos++;
 
 			int pos1 = 0;
-			while (pos1 < size-6)
+			while (pos1 < (int)size-6)
 			{
 				if (pos + pos1 > size)
 					return false;

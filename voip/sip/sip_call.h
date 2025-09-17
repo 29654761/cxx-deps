@@ -81,6 +81,7 @@ namespace voip
 			std::string call_id_;
 			std::string my_tag_;
 			std::string other_tag_;
+			std::vector<std::string> record_route_;
 
 			sip_message invite_;
 

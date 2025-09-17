@@ -175,6 +175,9 @@ namespace voip
 
 		call_ptr endpoint::make_call(const std::string& url, bool tcp)
 		{
+			if (!active_ || !server_)
+				return nullptr;
+
 			voip_uri vurl(url);
 			vurl.scheme = "sip";
 			auto con=server_->create_connection(vurl, tcp);
@@ -187,7 +190,7 @@ namespace voip
 			std::string nat = nat_address();
 			auto rtp = rtp_ports();
 			auto call = std::make_shared<sip_call>(self, con, alias,"", voip::call::direction_t::outgoing, nat, port_, rtp);
-			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
+			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6));
 			call->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1, std::placeholders::_2));
 			call->set_logger(log_);
 			call->set_url(vurl);
@@ -213,7 +216,7 @@ namespace voip
 			vurl.username = alias;
 			ep.con->remote_address(vurl.host, vurl.port);
 			call->set_logger(log_);
-			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
+			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6));
 			call->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1, std::placeholders::_2));
 			call->set_url(vurl);
 			call->set_max_bitrate(max_bitrate());
@@ -234,16 +237,15 @@ namespace voip
 
 			auto self = shared_from_this();
 
-			std::string lalias = local_alias();
 			std::string nat = nat_address();
 			auto rtp = rtp_ports();
 
-			auto call = std::make_shared<sip_call>(self, gkcon, lalias,"", voip::call::direction_t::outgoing, nat, port_, rtp);
+			auto call = std::make_shared<sip_call>(self, gkcon, gkclient->alias(), "", voip::call::direction_t::outgoing, nat, port_, rtp);
 			voip_uri vurl;
 			vurl.username = alias;
 			gkcon->remote_address(vurl.host, vurl.port);
 			call->set_logger(log_);
-			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
+			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6));
 			call->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1, std::placeholders::_2));
 			call->set_url(vurl);
 			call->set_max_bitrate(max_bitrate());
@@ -485,11 +487,11 @@ namespace voip
 		}
 
 		void endpoint::handle_incoming_call(endpoint_ptr self, call_ptr call, const std::string& local_alias, const std::string& remote_alias,
-			const std::string& remote_addr, int remote_port)
+			const std::string& remote_addr, int remote_port,bool reg)
 		{
 			if (on_incoming_call)
 			{
-				on_incoming_call(call, local_alias, remote_alias, remote_addr, remote_port);
+				on_incoming_call(call, local_alias, remote_alias, remote_addr, remote_port,reg);
 			}
 		}
 
@@ -706,7 +708,7 @@ namespace voip
 			std::string nat = nat_address();
 			auto rtp = rtp_ports();
 			call=std::make_shared<sip_call>(self, con, alias,"", voip::call::direction_t::incoming, nat, port_, rtp);
-			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
+			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5,std::placeholders::_6));
 			call->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1, std::placeholders::_2));
 			call->set_logger(log_);
 			call->set_max_bitrate(max_bitrate());

@@ -24,7 +24,7 @@ namespace voip
 		}
 
 
-		bool gk_client::start(const std::string& ras_addr, int ras_port, int local_port, int interval)
+		bool gk_client::start(const std::string& ras_addr, int ras_port, int local_port, int interval,bool h460_nat)
 		{
 			if (alias_.IsEmpty())
 				return false;
@@ -33,6 +33,7 @@ namespace voip
 				return true;
 			active_ = true;
 
+			h460_nat_ = h460_nat;
 			ras_addr_ = ras_addr;
 			ras_port_ = ras_port;
 			time_to_live_ = interval;
@@ -354,14 +355,17 @@ namespace voip
 
 
 			// FeatureSet for support H.460
-			req.IncludeOptionalField(H225_GatekeeperRequest::e_featureSet);
-			req.m_featureSet.m_replacementFeatureSet = false;
-			req.m_featureSet.IncludeOptionalField(H225_FeatureSet::e_supportedFeatures);
-			req.m_featureSet.m_supportedFeatures.RemoveAll();
-			H225_FeatureDescriptor* fea_desc = new H225_FeatureDescriptor();
-			fea_desc->m_id.SetTag(H225_GenericIdentifier::e_standard);
-			((PASN_Integer&)fea_desc->m_id) = 18;
-			req.m_featureSet.m_supportedFeatures.Append(fea_desc);
+			if (h460_nat_)
+			{
+				req.IncludeOptionalField(H225_GatekeeperRequest::e_featureSet);
+				req.m_featureSet.m_replacementFeatureSet = false;
+				req.m_featureSet.IncludeOptionalField(H225_FeatureSet::e_supportedFeatures);
+				req.m_featureSet.m_supportedFeatures.RemoveAll();
+				H225_FeatureDescriptor* fea_desc = new H225_FeatureDescriptor();
+				fea_desc->m_id.SetTag(H225_GenericIdentifier::e_standard);
+				((PASN_Integer&)fea_desc->m_id) = 18;
+				req.m_featureSet.m_supportedFeatures.Append(fea_desc);
+			}
 
 			PPER_Stream stream;
 			msg.Encode(stream);
@@ -423,15 +427,17 @@ namespace voip
 			req.m_maintainConnection = false;
 
 			// FeatureSet for support H.460
-			req.IncludeOptionalField(H225_RegistrationRequest::e_featureSet);
-			req.m_featureSet.m_replacementFeatureSet = false;
-			req.m_featureSet.IncludeOptionalField(H225_FeatureSet::e_supportedFeatures);
-			req.m_featureSet.m_supportedFeatures.RemoveAll();
-			H225_FeatureDescriptor* fea_desc = new H225_FeatureDescriptor();
-			fea_desc->m_id.SetTag(H225_GenericIdentifier::e_standard);
-			((PASN_Integer&)fea_desc->m_id) = 18;
-			req.m_featureSet.m_supportedFeatures.Append(fea_desc);
-
+			if (h460_nat_)
+			{
+				req.IncludeOptionalField(H225_RegistrationRequest::e_featureSet);
+				req.m_featureSet.m_replacementFeatureSet = false;
+				req.m_featureSet.IncludeOptionalField(H225_FeatureSet::e_supportedFeatures);
+				req.m_featureSet.m_supportedFeatures.RemoveAll();
+				H225_FeatureDescriptor* fea_desc = new H225_FeatureDescriptor();
+				fea_desc->m_id.SetTag(H225_GenericIdentifier::e_standard);
+				((PASN_Integer&)fea_desc->m_id) = 18;
+				req.m_featureSet.m_supportedFeatures.Append(fea_desc);
+			}
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();

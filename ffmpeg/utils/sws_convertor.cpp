@@ -30,12 +30,6 @@ namespace ffmpeg
             dst_height_ = dst_height;
             dst_format_ = dst_format;
 
-            frame_ = av_frame_alloc();
-            if (!frame_)
-            {
-                close();
-                return false;
-            }
 
             ctx_ = sws_getContext(src_width_, src_height_, src_format_,
                 dst_width, dst_height, dst_format,
@@ -57,10 +51,7 @@ namespace ffmpeg
                 sws_freeContext(ctx_);
                 ctx_ = nullptr;
             }
-            if (frame_)
-            {
-                av_frame_free(&frame_);
-            }
+
         }
 
         void sws_convertor::ensure_created(const AVFrame* frame, int dst_width, int dst_height, AVPixelFormat dst_format)
@@ -83,15 +74,26 @@ namespace ffmpeg
                 return nullptr;
             }
 
-            int r = sws_scale_frame(ctx_, frame_, inframe);
+            if (inframe->width == dst_width_ && inframe->height == dst_height_ && inframe->format == dst_format_)
+                return av_frame_clone(inframe);
+
+            AVFrame* ret = av_frame_alloc();
+            if (!ret)
+            {
+                return nullptr;
+            }
+
+            int r = sws_scale_frame(ctx_, ret, inframe);
             if (r < 0)
             {
                 return nullptr;
             }
-            frame_->width = dst_width_;
-            frame_->height = dst_height_;
-            frame_->format = (int)dst_format_;
-            return frame_;
+
+            av_frame_copy_props(ret, inframe);
+            ret->width = dst_width_;
+            ret->height = dst_height_;
+            ret->format = (int)dst_format_;
+            return ret;
         }
     }
 }

@@ -107,6 +107,7 @@ namespace ffmpeg
 			}
 			if (frame->pts != AV_NOPTS_VALUE) {
 				out_frame->pts = av_rescale_q(frame->pts, frame->time_base, out_frame->time_base);
+				out_frame->duration= av_rescale_q(frame->duration, frame->time_base, out_frame->time_base);
 			}
 			else {
 				out_frame->pts = AV_NOPTS_VALUE;

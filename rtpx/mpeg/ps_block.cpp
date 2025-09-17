@@ -19,7 +19,7 @@ namespace rtpx {
 			if (size < 6)
 				return 0;
 
-			int pos = 0;
+			size_t pos = 0;
 			start_code = buffer[3];
 			pos += 4;
 
@@ -28,7 +28,7 @@ namespace rtpx {
 			length |= ((uint16_t)buffer[pos+1]);
 			pos += 2;
 
-			if (pos + length > size)
+			if (pos + length > (int)size)
 				return 0;
 
 			block.append((const char*)buffer + pos, length);

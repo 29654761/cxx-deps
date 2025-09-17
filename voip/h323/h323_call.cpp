@@ -2363,7 +2363,7 @@ namespace voip
 
 			if (on_incoming_call)
 			{
-				on_incoming_call(self, local_alias_, remote_alias_, remote_ip, remote_port);
+				on_incoming_call(self, local_alias_, remote_alias_, remote_ip, remote_port, gkclient_!=nullptr);
 			}
 
 			if (log_)

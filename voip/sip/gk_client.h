@@ -32,6 +32,7 @@ namespace voip
 				username_ = username;
 				password_ = password;
 			}
+			const std::string& alias()const { return alias_; }
 			bool status()const { return is_registered_; }
 			void set_status_handler(status_handler_t handler) { status_handler_ = handler; }
 

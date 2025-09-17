@@ -430,7 +430,7 @@ namespace rtpx {
 		ms->set_local_ice_options(ice_ufrag_, ice_pwd_, ice_options_);
 		ms->set_cname(cname_);
 		auto self = shared_from_this();
-		ms->on_frame = std::bind(&rtp_session::handle_ms_frame, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+		ms->on_frame = std::bind(&rtp_session::handle_ms_frame, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5);
 		ms->on_receive_require_keyframe = std::bind(&rtp_session::handle_ms_request_keyframe, self, std::placeholders::_1);
 		if (on_send_require_keyframe)
 		{
@@ -865,11 +865,11 @@ namespace rtpx {
 	}
 
 
-	void rtp_session::handle_ms_frame(const std::string& mid, const sdp_format& fmt, const av_frame_t& frame)
+	void rtp_session::handle_ms_frame(const std::string& mid, const std::string& sid, const std::string& tid, const sdp_format& fmt, const av_frame_t& frame)
 	{
 		if (on_frame)
 		{
-			on_frame(mid, fmt, frame);
+			on_frame(mid,sid,tid, fmt, frame);
 		}
 	}
 

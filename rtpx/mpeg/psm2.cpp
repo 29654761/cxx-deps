@@ -15,7 +15,7 @@ namespace rtpx {
 		bool psm2::deserialize(const uint8_t* buffer, size_t size)
 		{
 			reset();
-			int pos = 0;
+			size_t pos = 0;
 
 			if (size < 4) {
 				return false;

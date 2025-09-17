@@ -43,7 +43,6 @@ namespace ffmpeg
             int dst_width_ = 0;
             int dst_height_ = 0;
             AVPixelFormat dst_format_ = AVPixelFormat::AV_PIX_FMT_NONE;
-            AVFrame* frame_ = nullptr;
         };
 
     }

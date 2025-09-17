@@ -44,7 +44,7 @@ namespace voip
 			void set_status_event(on_status_t handler) { on_status_event = handler; }
 			void set_incoming_call_event(on_incoming_call_t handler) { on_incoming_call_event = handler; }
 
-			bool start(const std::string& ras_addr,int ras_port, int local_port=0,int interval=30);
+			bool start(const std::string& ras_addr,int ras_port, int local_port=0,int interval=30,bool h460_nat=true);
 			void stop();
 
 			bool status()const { return is_registered_; }
@@ -140,6 +140,8 @@ namespace voip
 
 			asio::ip::udp::endpoint remote_ep_;
 			std::array<uint8_t, 10240> recv_buffer_;
+
+			bool h460_nat_ = false;
 		};
 
 

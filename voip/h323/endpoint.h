@@ -18,7 +18,7 @@ namespace voip
 			friend h323_call;
 		public:
 			typedef std::function<void (voip::call_ptr call, const std::string& called_alias, const std::string& remote_alias,
-				const std::string& remote_addr, int remote_port)> on_incoming_call_t;
+				const std::string& remote_addr, int remote_port,bool reg)> on_incoming_call_t;
 			typedef std::function<void(endpoint_ptr, bool)> on_gk_status_t;
 
 			typedef std::shared_ptr<asio::ip::tcp::socket> tcp_socket_ptr;
@@ -54,7 +54,7 @@ namespace voip
 			bool start(const std::string& addr,int port);
 			void stop();
 
-			bool start_gk_client(const PString& ras_address, WORD ras_port,const PString& alias, const PString& username,const PString& password);
+			bool start_gk_client(const PString& ras_address, WORD ras_port,const PString& alias, const PString& username,const PString& password,bool h460_nat);
 			void stop_gk_client();
 			bool is_gk_started()const;
 			bool gk_status()const;
@@ -67,7 +67,7 @@ namespace voip
 			void handle_accept(endpoint_ptr self, const std::error_code& ec, asio::ip::tcp::socket socket);
 			void handle_destroy_call(endpoint_ptr self, call_ptr call,call::reason_code_t reason);
 			void handle_incoming_call(endpoint_ptr self, call_ptr call,const std::string& local_alias, const std::string& remote_alias,
-				const std::string& remote_addr, int remote_port);
+				const std::string& remote_addr, int remote_port,bool reg);
 			void handle_facility(endpoint_ptr self, call_ptr call, const PGloballyUniqueID& call_id, const PGloballyUniqueID& conf_id);
 			void handle_gk_status(endpoint_ptr self, gk_client_ptr gk, bool status);
 			void handle_gk_incoming_call(endpoint_ptr self,gk_client_ptr gk, const H225_ServiceControlIndication& body, H225_ServiceControlResponse_result::Choices& result);
