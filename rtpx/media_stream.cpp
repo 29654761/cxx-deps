@@ -14,6 +14,7 @@
 #include "senders/sender_video_h265.h"
 #include "senders/sender_video_vp8.h"
 #include "senders/sender_video_vp9.h"
+#include "senders/sender_video_av1.h"
 #include "senders/sender_ps.h"
 #include "senders/sender_rtx.h"
 
@@ -23,6 +24,7 @@
 #include "receivers/receiver_video_h265.h"
 #include "receivers/receiver_video_vp8.h"
 #include "receivers/receiver_video_vp9.h"
+#include "receivers/receiver_video_av1.h"
 #include "receivers/receiver_ps.h"
 #include "receivers/receiver_rtx.h"
 
@@ -1322,6 +1324,10 @@ namespace rtpx {
 		{
 			sender = std::make_shared <sender_video_vp9>(fmt.pt, ssrc, media_type(), fmt, log_);
 		}
+		else if (fmt.codec == codec_type_av1)
+		{
+			sender = std::make_shared<sender_video_av1>(fmt.pt, ssrc, media_type(), fmt, log_);
+		}
 		else if (fmt.codec == codec_type_ps)
 		{
 			sender = std::make_shared <sender_ps>(fmt.pt, ssrc, media_type(), fmt, log_);
@@ -1440,6 +1446,10 @@ namespace rtpx {
 		else if (fmt.codec == codec_type_vp9)
 		{
 			receiver = std::make_shared <receiver_video_vp9>(ioc_,ssrc, media_type_video, fmt,log_);
+		}
+		else if (fmt.codec == codec_type_av1)
+		{
+			receiver = std::make_shared <receiver_video_av1>(ioc_, ssrc, media_type_video, fmt, log_);
 		}
 		else if (fmt.codec == codec_type_ps)
 		{

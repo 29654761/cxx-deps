@@ -6,6 +6,7 @@
  */
 
 #include "vp9_header.h"
+#include "../util/bit.h"
 #include <algorithm>
 
 #define CHECK_SIZE(sz,need) if ((sz) < (need)) return -1
@@ -318,26 +319,6 @@ int vp9_header::deserialize(const uint8_t* buffer, int offset, int size)
 
 
 
-static inline uint32_t make_mask(uint8_t off, uint8_t bits)
-{
-    uint32_t v = 1, msk = 0;
-    if (off + bits > 32)
-        return 0;
-    for (uint8_t i = 0; i < bits; i++)
-    {
-        msk |= (v << (31 - off++));
-    }
-    return msk;
-}
-
-static inline uint32_t read_bits(uint32_t v, uint8_t off, uint8_t bits)
-{
-    uint32_t msk = make_mask(off, bits);
-    if (msk == 0)
-        return 0;
-    return (v & msk) >> (32 - (off + bits));
-}
-
 
 bool vp9_header::is_keyframe(const uint8_t* buffer,size_t size)
 {
@@ -346,16 +327,16 @@ bool vp9_header::is_keyframe(const uint8_t* buffer,size_t size)
 
     uint32_t v = (buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | (buffer[3]);
     int pos = 0;
-    uint8_t marker = (uint8_t)read_bits(v, pos, 2);
+    uint8_t marker = (uint8_t)bit::read_bits_32(v, pos, 2);
     pos += 2;
     if (marker != 2)
         return false;
     
 
-    uint8_t version= (uint8_t)read_bits(v, pos, 1);
+    uint8_t version= (uint8_t)bit::read_bits_32(v, pos, 1);
     pos++;
 
-    uint8_t high= (uint8_t)read_bits(v, pos, 1);
+    uint8_t high= (uint8_t)bit::read_bits_32(v, pos, 1);
     pos++;
     
     uint8_t profile = (high << 1) + version;
@@ -364,16 +345,16 @@ bool vp9_header::is_keyframe(const uint8_t* buffer,size_t size)
         pos++;  //RESERVED_ZERO
     }
 
-    uint8_t show_existing_frame = (uint8_t)read_bits(v, pos, 1);
+    uint8_t show_existing_frame = (uint8_t)bit::read_bits_32(v, pos, 1);
     pos++;
 
     if (show_existing_frame) {
-        uint8_t index_of_frame_to_show = (uint8_t)read_bits(v, pos, 3);
+        uint8_t index_of_frame_to_show = (uint8_t)bit::read_bits_32(v, pos, 3);
         pos += 3;
         return false;
     }
 
-    uint8_t frame_type = (uint8_t)read_bits(v, pos, 1);
+    uint8_t frame_type = (uint8_t)bit::read_bits_32(v, pos, 1);
     pos++;
     return (frame_type == 0);
 }
