@@ -15,7 +15,6 @@ vp9_scalability_pg::vp9_scalability_pg()
 {
     tid = 0;
     u = 0;
-    p_diff;
 }
 
 vp9_scalability_pg::~vp9_scalability_pg()
