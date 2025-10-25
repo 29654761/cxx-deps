@@ -77,6 +77,8 @@ struct any_options_t
 	int sending = 0;
 	int recving = 1;
 
+	int log = 0;
+
 	// mixed pcm peer==1; 
 	// 0: packet
 	// 1: mixed-pcm; 

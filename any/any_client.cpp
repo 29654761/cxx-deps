@@ -46,7 +46,7 @@ bool any_client::init(const any_options_t& opts)
 	std::stringstream xml;
 	xml << "<complex type=\"linkmic_service\">" << std::endl;
 	xml << "<param n=\"rtpsink_printmask\" v=\"0x00\"></param>" << std::endl;
-	xml << "<param n=\"trace\" v=\"0\" />" << std::endl;
+	xml << "<param n=\"trace\" v=\"" << options_.log << "\" />" << std::endl;
 	xml << "<param n=\"picking\" v=\"1\" />" << std::endl;
 	//xml << "<param n=\"pos\" v=\"0x2a\" />" << std::endl;
 	//xml << "<param n=\"max_bitrate\" v=\"3000\" />" << std::endl;
@@ -59,7 +59,8 @@ bool any_client::init(const any_options_t& opts)
 	if(options_.mix_recv>0)
 	{
 		xml << "<mix_recv>"<< options_.mix_recv<<"</mix_recv>" << std::endl;
-		xml << "<mixer_no_waiting>1</mixer_no_waiting>" << std::endl;
+		//It will make crash
+		//xml << "<mixer_no_waiting>1</mixer_no_waiting>" << std::endl;
 	}
 	xml << "<recvcb>1</recvcb>" << std::endl;
 	xml << "<snding>"<<opts.sending<<"</snding>" << std::endl;
