@@ -627,6 +627,7 @@ namespace litertp {
 			{
 				if (fmt_in->fmtp.packetization_mode() != itr.second.fmtp.packetization_mode())
 					continue;
+
 				if (fmt_in->fmtp.profile_id() != itr.second.fmtp.profile_id())
 					continue;
 

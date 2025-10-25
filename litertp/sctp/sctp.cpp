@@ -7,6 +7,7 @@
 
 #include "sctp.h"
 #include <sys2/util.h>
+#include <string.h>
 
 namespace litertp
 {

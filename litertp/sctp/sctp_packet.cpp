@@ -7,6 +7,7 @@
 
 #include "sctp_packet.h"
 #include <sys2/security/crc32c.h>
+#include <string.h>
 
 namespace litertp
 {

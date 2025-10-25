@@ -7,6 +7,8 @@
 
 #pragma once
 #include <vector>
+#include <stdint.h>
+#include <stddef.h>
 
 namespace litertp
 {

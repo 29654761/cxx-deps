@@ -671,7 +671,7 @@ namespace rtpx {
 		{
 			if (itr.second.codec == fmt_in.codec && itr.second.frequency == fmt_in.frequency)
 			{
-				if (fmt_in.fmtp.packetization_mode() != itr.second.fmtp.packetization_mode())
+				 if (fmt_in.fmtp.packetization_mode() != itr.second.fmtp.packetization_mode())
 					continue;
 				if (fmt_in.fmtp.profile_id() != itr.second.fmtp.profile_id())
 					continue;

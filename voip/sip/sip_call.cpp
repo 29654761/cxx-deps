@@ -57,7 +57,7 @@ namespace voip
 			ms->use_rtp_address(true);
 			ms->add_local_video_track(codec_type_h264,96,90000,true);
 			litertp::fmtp fmtp;
-			//fmtp.set_packetization_mode(1);
+			fmtp.set_packetization_mode(1);
 			fmtp.set_profile_level_id(0x420028);
 			fmtp.set_mbps(245760);
 			fmtp.set_mfs(8192);
@@ -154,7 +154,6 @@ namespace voip
 					return false;
 				}
 			}
-
 
 
 			if (direction_ == direction_t::outgoing)
@@ -278,6 +277,7 @@ namespace voip
 			}
 			rtp_.set_remote_sdp(remote_sdp,sdp_type_offer);
 			auto sdp=rtp_.create_answer();
+			sdp.bundle = false;
 			std::string s = sdp.to_string();
 			/*
 			std::stringstream ss;
@@ -559,6 +559,7 @@ namespace voip
 			req.set_content_type("application/sdp");
 
 			litertp::sdp sdp = rtp_.create_offer();
+			sdp.bundle = false;
 			for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
 			{
 				itr->protos.erase("UDP");

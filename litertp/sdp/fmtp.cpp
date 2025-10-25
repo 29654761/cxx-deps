@@ -33,6 +33,8 @@ namespace litertp {
 			auto vec2 = sys::string_util::split(s2, "=");
 			if (vec2.size() >= 2)
 			{
+				sys::string_util::trim(vec2[0]);
+				sys::string_util::trim(vec2[1]);
 				map[vec2[0]] = vec2[1];
 			}
 		}
