@@ -26,6 +26,8 @@ namespace ffmpeg
 
 			static int64_t read_m3u8_duration(const std::string& filename);
 
+			static double pcm_volume_short(const short* pcm, size_t samples);
+			static double pcm_volume_float(const float* pcm,size_t samples);
 		};
 
 	}

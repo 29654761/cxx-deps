@@ -107,6 +107,43 @@ namespace ffmpeg
 			return (int64_t)duration;
 		}
 
+		double utility::pcm_volume_short(const short* pcm, size_t samples)
+		{
+			if (!pcm || samples == 0) 
+				return -99;
+
+			double sum = 0.0;
+			for (size_t i = 0; i < samples; i++) {
+				double v = pcm[i] / 32768.0;
+				sum += v * v;
+			}
+
+			double rms = sqrt(sum / samples);
+			if (rms <= 1e-9) 
+				return -99;
+
+			double db = 20.0 * log10(rms);
+			return db;
+		}
+
+		double utility::pcm_volume_float(const float* pcm, size_t samples)
+		{
+			if (!pcm || samples == 0) 
+				return -99;
+
+			double sum = 0.0;
+			for (size_t i = 0; i < samples; i++) {
+				double v = pcm[i];
+				sum += v * v;
+			}
+
+			double rms = sqrt(sum / samples);
+			if (rms <= 1e-9) 
+				return -99;
+
+			double db = 20.0 * log10(rms);
+			return db;
+		}
 	}
 }
 
