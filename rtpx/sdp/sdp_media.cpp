@@ -77,8 +77,9 @@ namespace rtpx {
 			char* endptr = nullptr;
 			for (size_t i = 3; i < ss.size(); i++)
 			{
+				uint8_t pt = (uint8_t)strtol(ss[i].c_str(), &endptr, 10);
 				sdp_format fmt;
-				fmt.pt = (uint8_t)strtol(ss[i].c_str(),&endptr,10);
+				set_default_format(pt, fmt);
 				rtpmap.insert(std::make_pair(fmt.pt, fmt));
 			}
 		}
@@ -775,6 +776,26 @@ namespace rtpx {
 			}
 		}
 		return false;
+	}
+
+	void sdp_media::set_default_format(uint8_t pt, sdp_format& fmt)
+	{
+		fmt.pt = pt;
+		if (pt == 0)
+		{
+			fmt.codec = codec_type_pcmu;
+			fmt.codec_text = sdp_format::convert_codec_text(fmt.codec);
+			fmt.frequency = 8000;
+			fmt.channels = 1;
+		}
+		else if (pt == 8)
+		{
+			fmt.codec = codec_type_pcma;
+			fmt.codec_text = sdp_format::convert_codec_text(fmt.codec);
+			fmt.frequency = 8000;
+			fmt.channels = 1;
+		}
+
 	}
 }
 

@@ -48,7 +48,7 @@ namespace litertp {
 		bool is_security()const;
 	private:
 		void to_protocols_string(std::stringstream& ss)const;
-		
+		void set_default_format(uint8_t pt, sdp_format& fmt);
 	public:
 		media_type_t media_type = media_type_audio;  //audio|video|text|application|message
 

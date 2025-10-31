@@ -51,7 +51,7 @@ namespace rtpx {
 		bool get_rtx_format(uint8_t pt,sdp_format& fmt)const;
 	private:
 		void to_protocols_string(std::stringstream& ss)const;
-		
+		void set_default_format(uint8_t pt, sdp_format& fmt);
 	public:
 		media_type_t media_type = media_type_unknown;  //audio|video|text|application|message
 
