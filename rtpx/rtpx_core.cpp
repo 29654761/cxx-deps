@@ -13,6 +13,7 @@ namespace rtpx {
 
 	rtpx_core* rtpx_core::s_instance = nullptr;
 
+
 	rtpx_core::rtpx_core()
 		:timer_(ioc_)
 	{
@@ -78,8 +79,8 @@ namespace rtpx {
 			workers_.push_back(std::move(wk));
 		}
 
-		timer_.expires_after(std::chrono::seconds(10));
-		timer_.async_wait(std::bind(&rtpx_core::handle_timer, this, std::placeholders::_1));
+		//timer_.expires_after(std::chrono::seconds(10));
+		//timer_.async_wait(std::bind(&rtpx_core::handle_timer, this, std::placeholders::_1));
 
 		return true;
 	}

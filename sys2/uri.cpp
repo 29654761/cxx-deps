@@ -264,6 +264,11 @@ namespace sys {
 		return true;
 	}
 
+	void uri::append_path(const std::string& path)
+	{
+		this->path=sys::string_util::join_path(this->path, path, '//');
+	}
+
 	std::string uri::url_encode(const std::string& str)
 	{
 		std::string str_temp = "";

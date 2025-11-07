@@ -38,7 +38,7 @@ namespace rtpx {
 		void start();
 		void stop();
 
-		bool is_timeout()const { return update_.is_timeout(20000); }
+		bool is_available()const { return !update_.is_timeout(20000); }
 
 		bool create_offer(sdp& offer);
 		bool create_answer(sdp& answer);

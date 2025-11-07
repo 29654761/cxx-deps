@@ -22,7 +22,11 @@ namespace rtpx
 		bool send_frame(const uint8_t* frame, uint32_t size, uint32_t duration);
 
 	private:
+		void send_nals(const std::vector<std::string>& nals, uint32_t duration);
 		void send_nal(uint32_t duration,const uint8_t* nal, uint32_t nal_size, bool islast);
+	private:
+		std::string sps_;
+		std::string pps_;
 	};
 
 

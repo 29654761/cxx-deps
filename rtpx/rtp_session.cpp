@@ -842,7 +842,7 @@ namespace rtpx {
 			}
 		}
 
-		if (is_timeout())
+		if (!is_available())
 		{
 			if (on_disconnected)
 			{

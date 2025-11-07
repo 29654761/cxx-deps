@@ -22,7 +22,7 @@ namespace ffmpeg
 		class video_decoder
 		{
 		public:
-			typedef void (*video_frame)(void* ctx, AVFrame* frame);
+			typedef void (*video_frame)(void* ctx,const AVFrame* frame);
 
 			video_decoder(const video_decoder_options& options);
 			virtual ~video_decoder();

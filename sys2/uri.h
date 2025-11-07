@@ -32,6 +32,7 @@ namespace sys {
 		void reset();
 
 		bool match_path(const std::string& path) const;
+		void append_path(const std::string& path);
 	private:
 		static unsigned char to_hex(unsigned char x);
 		static unsigned char from_hex(unsigned char x);

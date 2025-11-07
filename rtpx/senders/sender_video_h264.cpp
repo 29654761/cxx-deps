@@ -30,11 +30,45 @@ namespace rtpx
         std::vector<std::string> nals;
         while (h264::find_next_nal(frame, size, offset, nal_start, nal_size, islast))
         {
+            if (nal_size == 0)
+                continue;
+
             std::string nal;
             nal.assign((const char*)(frame + nal_start), nal_size);
-            nals.push_back(nal);
-            //send_nal(duration, frame + nal_start, nal_size, islast);
+
+            h264::nal_type_t t = h264::get_nal_type(nal[0]);
+            if (t == h264::nal_type_t::sps)
+            {
+                sps_ = nal;
+            }
+            else if (t == h264::nal_type_t::pps)
+            {
+                pps_ = nal;
+            }
+            else
+            {
+                nals.push_back(nal);
+            }
         }
+
+        if (!sps_.empty() && !pps_.empty())
+        {
+            std::vector<std::string> hdr;
+            hdr.push_back(sps_);
+            hdr.push_back(pps_);
+            send_nals(hdr, duration);
+            sps_.clear();
+            pps_.clear();
+        }
+
+        send_nals(nals,duration);
+        return true;
+	}
+    
+    void sender_video_h264::send_nals(const std::vector<std::string>& nals, uint32_t duration)
+    {
+        if (nals.size() == 0)
+            return;
 
         size_t total_nal_size = 0;
         for (auto itr = nals.begin(); itr != nals.end(); itr++)
@@ -42,7 +76,7 @@ namespace rtpx
             total_nal_size += itr->size();
         }
 
-        if (total_nal_size <= MAX_RTP_PAYLOAD_SIZE&&nals.size()>1)
+        if (total_nal_size <= MAX_RTP_PAYLOAD_SIZE && nals.size() > 1)
         {
             std::string nal = nals[0];
             uint8_t nal0 = nal[0];
@@ -81,13 +115,11 @@ namespace rtpx
         {
             for (auto itr = nals.begin(); itr != nals.end(); itr++)
             {
-                islast = itr == (nals.end() - 1);
-                send_nal(duration, (const uint8_t*)itr->data(), (uint32_t)itr->size(),islast);
+                bool islast = itr == (nals.end() - 1);
+                send_nal(duration, (const uint8_t*)itr->data(), (uint32_t)itr->size(), islast);
             }
         }
-        return true;
-	}
-    
+    }
 
     void sender_video_h264::send_nal(uint32_t duration, const uint8_t* nal, uint32_t nal_size, bool islast)
     {

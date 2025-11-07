@@ -47,7 +47,7 @@ namespace rtpx {
 		port_range& ports() { return ports_; }
 		
 		//asio::udp_socket_ptr create_socket(uint16_t port);
-		bool destroy_socket(uint16_t port);
+		//bool destroy_socket(uint16_t port);
 		//asio::udp_socket_ptr get_socket(uint16_t port);
 
 		
@@ -57,7 +57,7 @@ namespace rtpx {
 		//transport_ptr create_transport(uint16_t port, asio::udp_socket_ptr skt, const asio::ip::udp::endpoint& remote_endpoint);
 		//transport_ptr create_transport(uint16_t port,transport::send_handler sender, const asio::ip::udp::endpoint& remote_endpoint);
 
-		bool receive_message(const std::string& remote, const uint8_t* buffer, size_t size);
+		//bool receive_message(const std::string& remote, const uint8_t* buffer, size_t size);
 	private:
 		void run();
 		void handle_timer(const std::error_code& ec);
@@ -65,10 +65,10 @@ namespace rtpx {
 		//media_stream_ptr find_media_stream(uint32_t ssrc, uint16_t port, const const asio::ip::udp::endpoint& remote,bool is_rtp);
 		
 		//asio::udp_socket_ptr _create_socket(uint16_t port);
-		bool _destroy_socket(uint16_t port);
-		void free_idle_sockets();
-		void free_transports(uint16_t local_port);
-		bool is_port_idle(uint16_t local_port);
+		//bool _destroy_socket(uint16_t port);
+		//void free_idle_sockets();
+		//void free_transports(uint16_t local_port);
+		//bool is_port_idle(uint16_t local_port);
 		
 	private:
 		std::shared_mutex mutex_;

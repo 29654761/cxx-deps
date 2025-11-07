@@ -217,6 +217,28 @@ void sip_message::set_expires(int expires)
 	headers.set("Expires", v);
 }
 
+bool sip_message::effective_expires(int& v)const
+{
+	sip_address contact_addr;
+	if (this->contact(contact_addr))
+	{
+		std::string s;
+		if (contact_addr.get("expires", s))
+		{
+			char* endptr = nullptr;
+			v=(int)strtol(s.c_str(), &endptr, 10);
+			return true;
+		}
+	}
+
+	if (this->expires(v))
+	{
+		return true;
+	}
+
+	return false;
+}
+
 std::string sip_message::allow()const
 {
 	std::string value;

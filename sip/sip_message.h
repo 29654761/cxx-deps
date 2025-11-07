@@ -42,6 +42,7 @@ public:
 	int expires()const;
 	bool expires(int& v)const;
 	void set_expires(int expires);
+	bool effective_expires(int& v)const;
 
 	std::string allow()const;
 	void set_allow(const std::string& allow);
