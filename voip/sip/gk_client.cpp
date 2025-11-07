@@ -283,6 +283,13 @@ namespace voip
 			else if (status == "200")
 			{
 				updated_at_ = time(nullptr);
+
+				int expires = 0;
+				if (msg.effective_expires(expires))
+				{
+					time_to_live_ = std::max(expires - 10, 10);
+				}
+
 				set_status(true);
 			}
 			else

@@ -66,16 +66,16 @@ namespace voip
 				fmtp.set_level_asymmetry_allowed(1);
 				ms->set_local_fmtp(96, fmtp);
 			}
-			{
-				ms->add_local_video_track(codec_type_h264, 98, 90000, true);
-				litertp::fmtp fmtp;
-				fmtp.set_profile_level_id(0x420028);
-				fmtp.set_mbps(245760);
-				fmtp.set_mfs(8192);
-				fmtp.set_mbr(1920);
-				fmtp.set_level_asymmetry_allowed(1);
-				ms->set_local_fmtp(98, fmtp);
-			}
+			//{
+			//	ms->add_local_video_track(codec_type_h264, 98, 90000, true);
+			//	litertp::fmtp fmtp;
+			//	fmtp.set_profile_level_id(0x420028);
+			//	fmtp.set_mbps(245760);
+			//	fmtp.set_mfs(8192);
+			//	fmtp.set_mbr(1920);
+			//	fmtp.set_level_asymmetry_allowed(1);
+			//	ms->set_local_fmtp(98, fmtp);
+			//}
 			return true;
 		}
 

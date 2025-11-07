@@ -587,23 +587,21 @@ namespace voip
 			}
 
 			int expires = 0;
-			if (message.expires(expires))
+			bool has_expires = message.effective_expires(expires);
+			if (has_expires&&expires == 0) //offline
 			{
-				if (expires == 0) //offline
+				reg_endpoint ep;
+				if (get_reg_endpoint(addr.url.username, ep))
 				{
-					reg_endpoint ep;
-					if (get_reg_endpoint(addr.url.username, ep))
+					if (on_unreg_endpoint)
 					{
-						if (on_unreg_endpoint)
-						{
-							auto self = shared_from_this();
-							on_unreg_endpoint(self, ep);
-						}
+						auto self = shared_from_this();
+						on_unreg_endpoint(self, ep);
 					}
-					remove_reg_endpoint(addr.url.username);
-					con->send_message(rsp);
-					return;
 				}
+				remove_reg_endpoint(addr.url.username);
+				con->send_message(rsp);
+				return;
 			}
 
 			std::string auth = message.authenticate();
@@ -678,7 +676,7 @@ namespace voip
 				auto self = shared_from_this();
 				on_reg_endpoint(self, ep);
 			}
-
+			expires = 30;
 			rsp.set_expires(expires);
 			con->send_message(rsp);
 		}
