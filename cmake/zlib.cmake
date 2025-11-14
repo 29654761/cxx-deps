@@ -15,6 +15,6 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
     )
 else()
     target_link_libraries(${PROJECT_NAME} PRIVATE
-        "${CXX_BUILD}/zlib/out/${ABI}-${CONFIG}/lib/libz.a"
+        "${CXX_BUILD}/zlib/out/${ABI}-${CONFIG}/lib/libzlibstatic.a"
     )
 endif()
