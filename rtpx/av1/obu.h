@@ -1,7 +1,8 @@
 #pragma once
 
 #include <vector>
-
+#include <cstdint>
+#include <cstddef>
 
 #define OBU_SEQUENCE_HEADER 1			//SPS
 #define OBU_TEMPORAL_DELIMITER 2

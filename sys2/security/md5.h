@@ -6,9 +6,9 @@
  */
 
 
+#pragma once
 #ifndef __MD5_H__
 #define __MD5_H__
-
 
 #ifdef __cplusplus
 extern "C"
@@ -16,10 +16,7 @@ extern "C"
 #endif
 
 
-#define A	0x67452301
-#define B	0xEFCDAB89
-#define C	0x98BADCFE
-#define D	0x10325476
+
 
 	typedef union _MD5
 	{

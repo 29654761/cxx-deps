@@ -1,5 +1,6 @@
 #include "bfcp_packet.h"
 #include <sys2/socket.h>
+#include <cstring>
 
 bfcp_packet::bfcp_packet()
 {

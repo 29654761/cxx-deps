@@ -6,11 +6,15 @@
  */
 
 
+#include "md5.h"
 #include <stdio.h>
 #include <memory.h>
 #include <assert.h>
-#include "md5.h"
 
+#define A	0x67452301
+#define B	0xEFCDAB89
+#define C	0x98BADCFE
+#define D	0x10325476
 
 #define F(x,y,z)	((x&y)|((~x)&z))
 #define G(x,y,z)	((x&z)|(y&(~z)))

@@ -7,7 +7,8 @@
 
 #pragma once
 #include <vector>
-#include <stdint.h>
+#include <cstdint>
+#include <cstddef>
 
 namespace rtpx
 {
