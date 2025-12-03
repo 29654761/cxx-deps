@@ -20,7 +20,7 @@ namespace voip
 			typedef std::function<void(endpoint_ptr svr, const std::string& alias)> on_reg_endpoint_failed_t;
 			typedef std::function<void(endpoint_ptr svr, const reg_endpoint& ep)> on_unreg_endpoint_t;
 			typedef std::function<void(voip::call_type_t type, const std::string& alias, bool& success, std::string& password)>on_require_password_t;
-			typedef std::function<void(voip::call_ptr call,const std::string& called_alias,const std::string& remote_alias,
+			typedef std::function<void(voip::call_ptr call,const std::string& local_alias,const std::string& remote_alias, const std::string& called_alias,
 				const std::string& remote_addr,int remote_port,bool reg)> on_incoming_call_t;
 			typedef std::function<void(endpoint_ptr svr, bool status)>on_gk_status_t;
 
@@ -106,7 +106,7 @@ namespace voip
 			void handle_message(endpoint_ptr ep, sip_server_ptr svr, sip_connection_ptr con, const sip_message& message);
 			void handle_gkclient_status(endpoint_ptr ep,gk_client_ptr gkc, bool status);
 			void handle_destroy_call(endpoint_ptr self, call_ptr call, call::reason_code_t reason);
-			void handle_incoming_call(endpoint_ptr self, call_ptr call, const std::string& local_alias, const std::string& remote_alias,
+			void handle_incoming_call(endpoint_ptr self, call_ptr call, const std::string& local_alias, const std::string& remote_alias,const std::string& called_alias,
 				const std::string& remote_addr, int remote_port, bool reg);
 
 			void on_register(sip_connection_ptr con, const sip_message& message);

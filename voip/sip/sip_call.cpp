@@ -182,6 +182,9 @@ namespace voip
 
 				sip_address contact = invite_.contact();
 				sip_address from = invite_.from();
+				
+				std::string url = invite_.url();
+				voip_uri called_uri(url);
 
 				remote_alias_ = from.url.username;
 				if (remote_alias_.empty())
@@ -196,7 +199,7 @@ namespace voip
 
 				if (on_incoming_call)
 				{
-					on_incoming_call(self, local_alias_, remote_alias_, remote_addr, remote_port, is_gk_client_);
+					on_incoming_call(self, local_alias_, remote_alias_, called_uri.username, remote_addr, remote_port, is_gk_client_);
 				}
 			}
 

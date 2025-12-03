@@ -2334,6 +2334,12 @@ namespace voip
 					remote_alias_ = arr[0].c_str();
 				}
 			}
+
+			if (remote_alias_.empty())
+			{
+				remote_alias_=(const std::string&)q931.GetDisplayName();
+			}
+
 			if (uuie.HasOptionalField(H225_Setup_UUIE::e_sourceCallSignalAddress))
 			{
 				PIPSocket::Address addr;
@@ -2363,7 +2369,7 @@ namespace voip
 
 			if (on_incoming_call)
 			{
-				on_incoming_call(self, local_alias_, remote_alias_, remote_ip, remote_port, gkclient_!=nullptr);
+				on_incoming_call(self, local_alias_, remote_alias_, called_alias_url.username, remote_ip, remote_port, gkclient_!=nullptr);
 			}
 
 			if (log_)

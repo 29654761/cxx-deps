@@ -17,7 +17,7 @@ namespace voip
 			friend gk_client;
 			friend h323_call;
 		public:
-			typedef std::function<void (voip::call_ptr call, const std::string& called_alias, const std::string& remote_alias,
+			typedef std::function<void(voip::call_ptr call, const std::string& local_alias, const std::string& remote_alias, const std::string& called_alias,
 				const std::string& remote_addr, int remote_port,bool reg)> on_incoming_call_t;
 			typedef std::function<void(endpoint_ptr, bool)> on_gk_status_t;
 
@@ -66,7 +66,7 @@ namespace voip
 			void handle_timer(endpoint_ptr self, const std::error_code& ec);
 			void handle_accept(endpoint_ptr self, const std::error_code& ec, asio::ip::tcp::socket socket);
 			void handle_destroy_call(endpoint_ptr self, call_ptr call,call::reason_code_t reason);
-			void handle_incoming_call(endpoint_ptr self, call_ptr call,const std::string& local_alias, const std::string& remote_alias,
+			void handle_incoming_call(endpoint_ptr self, call_ptr call,const std::string& local_alias, const std::string& remote_alias, const std::string& called_alias,
 				const std::string& remote_addr, int remote_port,bool reg);
 			void handle_facility(endpoint_ptr self, call_ptr call, const PGloballyUniqueID& call_id, const PGloballyUniqueID& conf_id);
 			void handle_gk_status(endpoint_ptr self, gk_client_ptr gk, bool status);
