@@ -23,6 +23,9 @@ namespace litertp {
 		ss << "v=" << v << "\r\n";
 		ss << "o=" << o << "\r\n";
 		ss << "s=" << s << "\r\n";
+		if (has_address) {
+			ss << "c=" << network_type << " " << address_type << " " << address << "\r\n";
+		}
 		if (i.size() > 0) {
 			ss << "i=" << i << "\r\n";
 		}
@@ -36,9 +39,7 @@ namespace litertp {
 			ss << "p=" << p << "\r\n";
 		}
 
-		if (has_address) {
-			ss << "c=" << network_type << " " << address_type << " " << address << "\r\n";
-		}
+
 		for (auto itr = b.begin(); itr != b.end(); itr++)
 		{
 			ss << "b=" << *itr << "\r\n";

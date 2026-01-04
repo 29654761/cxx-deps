@@ -375,7 +375,7 @@ namespace voip
 			return call;
 		}
 
-		bool endpoint::remove_call(std::shared_ptr<sip_call> call, call::reason_code_t reason)
+		bool endpoint::remove_call(std::shared_ptr<sip_call> call)
 		{
 			std::lock_guard<std::recursive_mutex> lk(calls_mutex_);
 			auto itr = calls_.find(call->id());
@@ -482,7 +482,7 @@ namespace voip
 			auto p = std::dynamic_pointer_cast<sip_call>(call);
 			if (p)
 			{
-				remove_call(p, reason);
+				remove_call(p);
 			}
 		}
 
@@ -518,6 +518,7 @@ namespace voip
 				if ((*itr)->is_inactive())
 				{
 					(*itr)->invoke_hangup(call::reason_code_t::timeout);
+					(*itr)->stop(call::reason_code_t::timeout);
 				}
 			}
 

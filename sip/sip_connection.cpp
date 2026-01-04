@@ -45,6 +45,7 @@ void sip_connection::invoke_close()
 		auto self = shared_from_this();
 		close_handler_(self);
 	}
+	stop();
 }
 
 void sip_connection::on_message(const sip_message& message)

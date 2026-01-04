@@ -84,6 +84,8 @@ namespace ffmpeg
             int r = avcodec_open2(context_, codec, nullptr);
             if (r != 0)
             {
+                char err[64] = {};
+                av_make_error_string(err, 64, r);
                 close();
                 return false;
             }

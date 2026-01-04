@@ -200,7 +200,7 @@ namespace litertp
 
 				if (!waiting_for_keyframe_)
 				{
-					invoke_rtp_frame(frame);
+					invoke_nal_frame(frame);
 					stats_.frames_received++;
 				}
 				else
@@ -240,7 +240,7 @@ namespace litertp
 					{
 						frame.data = (uint8_t*)frame_data.data();
 						frame.data_size = (uint32_t)frame_data.size();
-						invoke_rtp_frame(frame);
+						invoke_nal_frame(frame);
 						stats_.frames_received++;
 					}
 					else
@@ -288,7 +288,7 @@ namespace litertp
 					{
 						frame.data = (uint8_t*)frame_data.data();
 						frame.data_size = (uint32_t)frame_data.size();
-						invoke_rtp_frame(frame);
+						invoke_nal_frame(frame);
 						stats_.frames_received++;
 					}
 					else
@@ -339,7 +339,7 @@ namespace litertp
 
 					if (!waiting_for_keyframe_)
 					{
-						invoke_rtp_frame(frame);
+						invoke_nal_frame(frame);
 						stats_.frames_received++;
 					}
 					else
@@ -388,7 +388,7 @@ namespace litertp
 					
 					if (!waiting_for_keyframe_)
 					{
-						invoke_rtp_frame(frame);
+						invoke_nal_frame(frame);
 						stats_.frames_received++;
 					}
 					else
@@ -408,11 +408,17 @@ namespace litertp
 				h264::fu_header_t fuh = { 0 };
 				h264::fu_header_set(&fuh, payload[1]);
 
+
+				if (fuh.s == 1&&(fu_frame_data.size()>0)
+					||(first_pkt&&first_pkt->handle_->header->ts != pkt->handle_->header->ts))
+				{
+					commit_fu_frame(fu_frame_data, first_pkt);
+				}
+
 				if (fuh.s == 1)
 				{
 					first_pkt = pkt;
 
-					fu_frame_data = "";
 					fu_frame_data.clear();
 					fu_frame_data.reserve(MAX_RTP_PAYLOAD_SIZE* pkts.size() + 4);
 					fu_frame_data.append(3, 0);
@@ -430,9 +436,6 @@ namespace litertp
 					continue;
 				}
 
-				
-
-
 				int skip_nal_data = 2;
 				if (fui.t == 29) //FU-B
 				{
@@ -445,34 +448,7 @@ namespace litertp
 
 				if(fuh.e == 1) //end
 				{
-					if (fu_frame_data.size() > 0)
-					{
-						av_frame_t frame;
-						memset(&frame, 0, sizeof(frame));
-						frame.ct = codec_type_h264;
-						frame.mt = media_type_video;
-						frame.pts = first_pkt->handle_->header->ts;
-						frame.dts = frame.pts;
-						frame.data = (uint8_t*)fu_frame_data.data();
-						frame.data_size = (uint32_t)fu_frame_data.size();
-
-						h264::nal_header_t nalh = { 0 };
-						h264::nal_header_set(&nalh, frame.data[4]);
-						if (nalh.t == 5 || nalh.t == 7 || nalh.t == 8)
-						{
-							waiting_for_keyframe_ = false;
-						}
-
-						if (!waiting_for_keyframe_)
-						{
-							invoke_rtp_frame(frame);
-							stats_.frames_received++;
-						}
-						else
-						{
-							stats_.frames_droped++;
-						}
-					}
+					commit_fu_frame(fu_frame_data, first_pkt);
 				}
 			}
 			else
@@ -490,5 +466,57 @@ namespace litertp
 		return true;
 	}
 
+	void receiver_video_h264::commit_fu_frame(std::string& fu_frame_data, packet_ptr& first_pkt)
+	{
+		if (fu_frame_data.size() > 0)
+		{
+			av_frame_t frame;
+			memset(&frame, 0, sizeof(frame));
+			frame.ct = codec_type_h264;
+			frame.mt = media_type_video;
+			frame.pts = first_pkt->handle_->header->ts;
+			frame.dts = frame.pts;
+			frame.data = (uint8_t*)fu_frame_data.data();
+			frame.data_size = (uint32_t)fu_frame_data.size();
+
+			h264::nal_header_t nalh = { 0 };
+			h264::nal_header_set(&nalh, frame.data[4]);
+			if (nalh.t == 5 || nalh.t == 7 || nalh.t == 8)
+			{
+				waiting_for_keyframe_ = false;
+			}
+
+			if (!waiting_for_keyframe_)
+			{
+				invoke_nal_frame(frame);
+				stats_.frames_received++;
+			}
+			else
+			{
+				stats_.frames_droped++;
+			}
+
+			fu_frame_data.clear();
+			first_pkt.reset();
+		}
+	}
+
+	void receiver_video_h264::invoke_nal_frame(av_frame_t& frame)
+	{
+		std::vector<nal_splicer::nal_item_t> nals;
+		splicer_.insert_nal(frame.data+4, frame.data_size-4,frame.pts,frame.dts, nals);
+		for(const auto& nal : nals)
+		{
+			av_frame_t frame2;
+			memset(&frame2, 0, sizeof(frame2));
+			frame2.ct = codec_type_h264;
+			frame2.mt = media_type_video;
+			frame2.pts = nal.pts;
+			frame2.dts= nal.dts;
+			frame.data = (uint8_t*)nal.nal.data();
+			frame.data_size = (uint32_t)nal.nal.size();
+			receiver::invoke_rtp_frame(frame);
+		}
+	}
 
 }

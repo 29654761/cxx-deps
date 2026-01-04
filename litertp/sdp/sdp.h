@@ -35,6 +35,7 @@ namespace litertp {
 		std::string t= "0 0";
 		std::string r;
 
+		//c
 		bool has_address = false;
 		std::string network_type = "IN";
 		std::string address_type = "IP4";

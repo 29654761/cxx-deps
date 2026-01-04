@@ -34,7 +34,7 @@ namespace rtpx {
 		{
 			return;
 		}
-
+		update_.update();
 		auto self = shared_from_this();
 		timer_count_ = 0;
 		timer_interval_ = 1;

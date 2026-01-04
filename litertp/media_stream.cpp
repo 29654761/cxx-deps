@@ -1098,10 +1098,10 @@ namespace litertp
 		if (get_remote_rtp_endpoint(&addr_rtp) && get_remote_rtcp_endpoint(&addr_rtcp))
 		{
 			this->get_remote_rtp_endpoint(&addr_rtp);
-			transport_rtp_->send_stun_request((const sockaddr*)&addr_rtp, sizeof(addr_rtp), (uint32_t)remote_rtp_endpoint_priority);
+			transport_rtp_->send_stun_request((const sockaddr*)&addr_rtp, sizeof(addr_rtp), (uint32_t)1);
 			if (!sdpm_remote.rtcp_mux&& transport_rtp_!= transport_rtcp_)
 			{
-				transport_rtcp_->send_stun_request((const sockaddr*)&addr_rtcp, sizeof(addr_rtcp), (uint32_t)remote_rtcp_endpoint_priority);
+				transport_rtcp_->send_stun_request((const sockaddr*)&addr_rtcp, sizeof(addr_rtcp), (uint32_t)1);
 			}
 		}
 		else

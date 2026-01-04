@@ -3387,6 +3387,7 @@ namespace voip
 					auto self = shared_from_this();
 					on_hangup(self, call::reason_code_t::net_error);
 				}
+				stop(call::reason_code_t::net_error);
 				return;
 			}
 			if (!h225_buffer_.write(h225_recv_buffer_.data(),bytes))

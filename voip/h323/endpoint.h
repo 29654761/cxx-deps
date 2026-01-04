@@ -75,7 +75,7 @@ namespace voip
 
 			bool add_call(std::shared_ptr<h323_call> call);
 			std::shared_ptr<h323_call> get_call(const std::string& call_id);
-			bool remove_call(std::shared_ptr<h323_call> call,call::reason_code_t reason);
+			bool remove_call(std::shared_ptr<h323_call> call);
 			void all_calls(std::vector<std::shared_ptr<h323_call>>& vec);
 			size_t count_calls();
 			void clear_calls();

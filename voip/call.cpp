@@ -6,6 +6,7 @@ namespace voip
 	call::call(const std::string& local_alias, const std::string& remote_alias, direction_t direction,
 		const std::string& nat_address, int port, litertp::port_range_ptr rtp_ports)
 		:updated_at_(0)
+		, rtp_(false,true)
 		, triggered_connected_(false)
 	{
 		local_alias_ = local_alias;

@@ -8,7 +8,7 @@
 #pragma once
 
 #include "receiver.h"
-
+#include "../h264/nal_splicer.h"
 
 
 namespace litertp
@@ -31,7 +31,11 @@ namespace litertp
 
 		bool combin_frame(const std::vector<packet_ptr>& pkts);
 
+		void commit_fu_frame(std::string& fu_frame_data,packet_ptr& first_pkt);
 	
+		void invoke_nal_frame(av_frame_t& frame);
+	private:
+		nal_splicer splicer_;
 	};
 
 

@@ -305,6 +305,7 @@ namespace voip
 				if ((*itr)->is_inactive())
 				{
 					(*itr)->invoke_hangup(call::reason_code_t::timeout);
+					(*itr)->stop(call::reason_code_t::timeout);
 				}
 			}
 
@@ -357,7 +358,7 @@ namespace voip
 			auto p=std::dynamic_pointer_cast<h323_call>(call);
 			if (p)
 			{
-				remove_call(p,reason);
+				remove_call(p);
 			}
 		}
 
@@ -410,7 +411,7 @@ namespace voip
 		}
 
 
-		bool endpoint::remove_call(std::shared_ptr<h323_call> call, call::reason_code_t reason)
+		bool endpoint::remove_call(std::shared_ptr<h323_call> call)
 		{
 			bool ret = false;
 			std::lock_guard<std::recursive_mutex> lk(calls_mutex_);

@@ -77,9 +77,10 @@ namespace ffmpeg
 
 			std::string video_size = std::to_string(width) + "x" + std::to_string(height);
 			av_dict_set(&options, "video_size", video_size.c_str(), 0);
-
-			av_dict_set(&options, "vcodec", vcodec.c_str(), 0);
-
+			if (!vcodec.empty())
+			{
+				av_dict_set(&options, "vcodec", vcodec.c_str(), 0);
+			}
 			std::string url = "video=" + device_name;
 			bool ret = open(url, fmt, options);
 
