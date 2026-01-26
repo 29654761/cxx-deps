@@ -1,4 +1,4 @@
-#include "video_encoder_h264_soft.h"
+#include "video_encoder_h265_soft.h"
 #include <string>
 
 
@@ -6,18 +6,18 @@ namespace ffmpeg
 {
 	namespace codecs
 	{
-		video_encoder_h264_soft::video_encoder_h264_soft(const video_encoder_options& options)
+		video_encoder_h265_soft::video_encoder_h265_soft(const video_encoder_options& options)
 			:video_encoder(options)
 		{
-			this->options_.codec_id = AVCodecID::AV_CODEC_ID_H264;
+			this->options_.codec_id = AVCodecID::AV_CODEC_ID_HEVC;
 		}
 
-		video_encoder_h264_soft::~video_encoder_h264_soft()
+        video_encoder_h265_soft::~video_encoder_h265_soft()
 		{
             close();
 		}
 
-		bool video_encoder_h264_soft::open()
+		bool video_encoder_h265_soft::open()
 		{
             if (is_opened())
             {
