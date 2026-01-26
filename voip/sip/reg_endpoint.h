@@ -23,7 +23,9 @@ namespace voip
 			}
 			void close()
 			{
-				con->stop();
+				if (con) {
+					con->stop();
+				}
 			}
 
 		public:

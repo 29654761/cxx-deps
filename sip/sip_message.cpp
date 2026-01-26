@@ -296,7 +296,7 @@ void sip_message::reset()
 	hypertext::message::reset();
 }
 
-sip_message sip_message::create_request(const std::string& method, const voip_uri& url, uint64_t cseq, const std::vector<sip_via>& vias)
+sip_message sip_message::create_request(const std::string& method, const voip_uri& url, uint64_t cseq, const std::vector<sip_via>& vias, const std::string& user_agent)
 {
 	sip_message request;
 	request.set_request_version("SIP/2.0");
@@ -306,6 +306,7 @@ sip_message sip_message::create_request(const std::string& method, const voip_ur
 		request.add_via(*itr);
 	request.set_cseq((uint32_t)cseq, method);
 	request.set_body("");
+	request.set_user_agent(user_agent);
 	return request;
 }
 

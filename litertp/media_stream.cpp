@@ -1306,9 +1306,9 @@ namespace litertp
 			return false;
 		}
 
-		std::string ip;
-		int port = 0;
-		sys::socket::addr2ep((const sockaddr*)&addr, &ip, &port);
+		//std::string ip;
+		//int port = 0;
+		//sys::socket::addr2ep((const sockaddr*)&addr, &ip, &port);
 
 		return transport_rtp_->send_rtp_packet(packet, (const sockaddr*)&addr, sizeof(addr));
 	}

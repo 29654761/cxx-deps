@@ -54,6 +54,20 @@ namespace voip
 			return nat_address_;
 		}
 
+		void endpoint::set_user_agent(const std::string& user_agent)
+		{
+			std::unique_lock<std::shared_mutex> lk(mutex_);
+			user_agent_ = user_agent;
+		}
+
+		const std::string& endpoint::user_agent()const
+		{
+			std::shared_lock<std::shared_mutex> lk(mutex_);
+			return user_agent_;
+		}
+
+
+
 
 		void endpoint::set_rtp_ports(litertp::port_range_ptr ports)
 		{
@@ -305,14 +319,23 @@ namespace voip
 
 		bool endpoint::remove_reg_endpoint(const std::string& name)
 		{
-			std::lock_guard<std::recursive_mutex> lk(reg_endpoints_mutex_);
-			auto itr = reg_endpoints_.find(name);
-			if (itr == reg_endpoints_.end())
-				return false;
+			voip::sip::reg_endpoint ep;
+			bool found = false;
 
-			itr->second.close();
-			reg_endpoints_.erase(itr);
+			{
+				std::lock_guard<std::recursive_mutex> lk(reg_endpoints_mutex_);
+				auto itr = reg_endpoints_.find(name);
+				if (itr == reg_endpoints_.end())
+					return false;
+				ep = itr->second;
+				found = true;
+				reg_endpoints_.erase(itr);
+			}
 
+			if (found)
+			{
+				ep.close();
+			}
 			return true;
 		}
 
@@ -416,7 +439,7 @@ namespace voip
 			const std::vector<sip_via>& vias, bool allow)
 		{
 			
-			sip_message req = sip_message::create_request(method, url, cseq, vias);
+			sip_message req = sip_message::create_request(method, url, cseq, vias, user_agent());
 
 			req.set_from(from);
 			req.set_to(to);
@@ -791,6 +814,13 @@ namespace voip
 			if (call)
 			{
 				call->on_options(message);
+			}
+			else
+			{
+				auto rsp = create_response(message, nullptr, false);
+				rsp.set_status("487");
+				rsp.set_msg("Request Terminated");
+				con->send_message(rsp);
 			}
 		}
 

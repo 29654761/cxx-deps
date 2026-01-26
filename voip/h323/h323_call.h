@@ -119,6 +119,7 @@ namespace voip
 			bool send_connect();
 			bool send_release_complete(H225_ReleaseCompleteReason::Choices reason,bool from_dest);
 			bool send_empty();
+			bool send_status(const H225_GloballyUniqueID& uuid);
 
 			//h245
 			bool send_terminal_capability_set();
@@ -173,6 +174,7 @@ namespace voip
 
 			void on_setup(const H225_Setup_UUIE& uuie,const Q931& q931);
 			void on_call_proceeding(const H225_CallProceeding_UUIE& uuie);
+			void on_status_inquiry(const H225_StatusInquiry_UUIE& uuie);
 			void on_alerting(const H225_Alerting_UUIE& uuie);
 			void on_facility(const H225_H323_UU_PDU& pdu, const Q931& q931);
 			void on_connect(const H225_Connect_UUIE& uuie, const Q931& q931);

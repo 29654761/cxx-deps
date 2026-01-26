@@ -49,7 +49,9 @@ namespace voip
 			void set_nat_address(const std::string& nat_address);
 			const std::string& nat_address()const;
 			
-			
+			void set_user_agent(const std::string& user_agent);
+			const std::string& user_agent()const;
+
 			void set_rtp_ports(litertp::port_range_ptr ports);
 			litertp::port_range_ptr rtp_ports()const;
 			
@@ -133,6 +135,7 @@ namespace voip
 			std::string alias_;
 			std::string realm_;
 			std::string nat_address_;
+			std::string user_agent_ = "RTC VOIP SDK";
 			int port_ = 5060;
 
 			litertp::port_range_ptr rtp_ports_;

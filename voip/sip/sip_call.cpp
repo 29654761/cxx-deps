@@ -62,20 +62,21 @@ namespace voip
 				fmtp.set_profile_level_id(0x420028);
 				fmtp.set_mbps(245760);
 				fmtp.set_mfs(8192);
-				fmtp.set_mbr(1920);
+				fmtp.set_mbr(max_bitrate_);
 				fmtp.set_level_asymmetry_allowed(1);
 				ms->set_local_fmtp(96, fmtp);
 			}
-			//{
-			//	ms->add_local_video_track(codec_type_h264, 98, 90000, true);
-			//	litertp::fmtp fmtp;
-			//	fmtp.set_profile_level_id(0x420028);
-			//	fmtp.set_mbps(245760);
-			//	fmtp.set_mfs(8192);
-			//	fmtp.set_mbr(1920);
-			//	fmtp.set_level_asymmetry_allowed(1);
-			//	ms->set_local_fmtp(98, fmtp);
-			//}
+			{
+				ms->add_local_video_track(codec_type_h264, 98, 90000, true);
+				litertp::fmtp fmtp;
+				fmtp.set_packetization_mode(1);
+				fmtp.set_profile_level_id(0x640028);
+				fmtp.set_mbps(245760);
+				fmtp.set_mfs(8192);
+				fmtp.set_mbr(max_bitrate_);
+				fmtp.set_level_asymmetry_allowed(1);
+				ms->set_local_fmtp(98, fmtp);
+			}
 			return true;
 		}
 
@@ -213,30 +214,33 @@ namespace voip
 
 		void sip_call::stop(voip::call::reason_code_t reason)
 		{
-			std::lock_guard<std::recursive_mutex> lk(mutex_);
-			bool experted = true;
-			if (!active_.compare_exchange_strong(experted, false))
-				return;
-
-			rtp_.stop();
-			std::error_code ec;
-			timer_.cancel(ec);
-
-			sip_connection_ptr con = get_con();
-			if (con)
+			sip_connection_ptr con;
 			{
-				if (got_ack)
+				std::lock_guard<std::recursive_mutex> lk(mutex_);
+				bool experted = true;
+				if (!active_.compare_exchange_strong(experted, false))
+					return;
+
+				rtp_.stop();
+				std::error_code ec;
+				timer_.cancel(ec);
+
+				con = get_con();
+				if (con)
 				{
-					for (int i = 0; i < 3; i++)
+					if (got_ack)
 					{
-						if (got_bye)
-							break;
-						bye();
-						std::this_thread::sleep_for(std::chrono::seconds(1));
+						for (int i = 0; i < 3; i++)
+						{
+							if (got_bye)
+								break;
+							bye();
+							std::this_thread::sleep_for(std::chrono::seconds(1));
+						}
 					}
 				}
+				clear_con();
 			}
-			clear_con();
 			if (!is_gk_client_)
 			{
 				if (con)
@@ -574,8 +578,16 @@ namespace voip
 
 			litertp::sdp sdp = rtp_.create_offer();
 			sdp.bundle = false;
+			sdp.o = "srtc 2371158016 0 IN IP4 "+ nat_address_;
+			sdp.b.push_back("CT:" + std::to_string(max_bitrate_));
 			for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
 			{
+				if (itr->media_type == media_type_video)
+				{
+					itr->b.push_back("AS:" + std::to_string(max_bitrate_));
+					//itr->b.push_back("TIAS:" + std::to_string((uint32_t)(max_bitrate_ * 1000)));
+				}
+				itr->setup = stp_setup_none;
 				itr->protos.erase("UDP");
 			}
 			std::string s = sdp.to_string();

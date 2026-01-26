@@ -5,7 +5,7 @@
 #endif
 #include <librtc.h>
 #include <mutex>
-
+#include <memory>
 
 
 class rtc_publisher :public std::enable_shared_from_this<rtc_publisher>

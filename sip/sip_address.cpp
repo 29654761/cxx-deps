@@ -20,34 +20,49 @@ void sip_address::parse(const std::string& s)
 {
 	display = "";
 	int i = 0;
-	bool has_display = false;
+	bool display_begin = false;
+	bool display_end = false;
 	for (; i < s.length(); i++)
 	{
 		char c = s.at(i);
+		if (c == '\"')
+		{
+			if (!display_begin)
+			{
+				display_begin = true;
+			}
+			else
+			{
+				display_end = true;
+			}
+			continue;
+		}
+
 		if (c == ' ' || c == '<')
 		{
-			has_display = true;
-			break;
+			if (!display_begin || (display_begin && display_end))
+			{
+				break;
+			}
 		}
-		if (c != '\"') {
-			display.append(1, c);
-		}
+
+		display.append(1, c);
 	}
-	if (!has_display)
-	{
-		display = "";
-		url.parse(s);
-		queries.clear();
-		for (auto itr = url.queries.begin(); itr != url.queries.end(); itr++) 
-		{
-			query_item_t item;
-			item.name = itr->name;
-			item.value = itr->value;
-			queries.push_back(item);
-		}
-		url.queries.clear();
-	}
-	else
+
+	//if (display.empty())
+	//{
+	//	url.parse(s);
+	//	queries.clear();
+	//	for (auto itr = url.queries.begin(); itr != url.queries.end(); itr++) 
+	//	{
+	//		query_item_t item;
+	//		item.name = itr->name;
+	//		item.value = itr->value;
+	//		queries.push_back(item);
+	//	}
+	//	url.queries.clear();
+	//}
+	//else
 	{
 		bool has_angle_brackets = false;
 		std::string suri;
@@ -67,6 +82,7 @@ void sip_address::parse(const std::string& s)
 			}
 			suri.append(1, c);
 		}
+
 
 		this->url.parse(suri);
 

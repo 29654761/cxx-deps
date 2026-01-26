@@ -369,11 +369,9 @@ namespace voip
 			confirm.m_protocolIdentifier = request.m_protocolIdentifier;
 			confirm.IncludeOptionalField(H225_GatekeeperConfirm::e_gatekeeperIdentifier);
 			confirm.m_gatekeeperIdentifier = gk_identifier_;
-			confirm.m_rasAddress.SetTag(H225_TransportAddress::e_ipAddress);
-			H225_TransportAddress_ipAddress& ras_addr = (H225_TransportAddress_ipAddress&)confirm.m_rasAddress;
+
 			PIPSocket::Address ras_nat(nat_address_);
-			ras_addr.m_ip = ras_nat;
-			ras_addr.m_port = port_;
+			h323_util::h225_transport_address_set(confirm.m_rasAddress, ras_nat, port_);
 
 			confirm.IncludeOptionalField(H225_GatekeeperConfirm::e_authenticationMode);
 			confirm.m_authenticationMode.SetTag(H235_AuthenticationMechanism::e_pwdHash);
@@ -381,6 +379,7 @@ namespace voip
 			confirm.m_algorithmOID = OID_MD5;
 			confirm.IncludeOptionalField(H225_GatekeeperConfirm::e_featureSet);
 			confirm.m_featureSet = request.m_featureSet;
+
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
@@ -643,11 +642,8 @@ namespace voip
 			confirm.m_requestSeqNum = request.m_requestSeqNum;
 			confirm.m_bandWidth = bandwidth;
 
-			confirm.m_rasAddress.SetTag(H225_TransportAddress::e_ipAddress);
-			H225_TransportAddress_ipAddress& ras_addr = (H225_TransportAddress_ipAddress&)confirm.m_rasAddress;
 			PIPSocket::Address ras_nat(nat_address_);
-			ras_addr.m_ip = ras_nat;
-			ras_addr.m_port = port_;
+			h323_util::h225_transport_address_set(confirm.m_rasAddress, ras_nat, port_);
 
 			PPER_Stream stream;
 			msg.Encode(stream);

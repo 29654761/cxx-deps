@@ -58,6 +58,6 @@ public:
 
 	virtual void reset();
 
-	static sip_message create_request(const std::string& method,const voip_uri& url, uint64_t cseq,const std::vector<sip_via>& vias);
+	static sip_message create_request(const std::string& method,const voip_uri& url, uint64_t cseq,const std::vector<sip_via>& vias,const std::string& user_agent);
 	static sip_message create_response(const sip_message& request);
 };

@@ -1,4 +1,5 @@
 #include "rtc_publisher.h"
+#include <string.h>
 
 rtc_publisher::rtc_publisher()
 {

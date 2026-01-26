@@ -236,34 +236,36 @@ namespace voip
 
 		void h323_call::stop(voip::call::reason_code_t reason)
 		{
-			std::lock_guard<std::recursive_mutex> lk(mutex_);
-			bool experted = true;
-			if (!active_.compare_exchange_strong(experted, false))
-				return;
-			
-			rtp_.stop();
-			std::error_code ec;
-			timer_.cancel(ec);
-			if (h245_skt_)
 			{
-				this->close_local_channels();
-				this->close_remote_channels();
-				std::this_thread::sleep_for(std::chrono::milliseconds(500));
-				this->send_end_session_command();
-				std::this_thread::sleep_for(std::chrono::milliseconds(500));
-				if (gkclient_)
-				{
-					gkclient_->send_disengage_request(H225_DisengageReason::e_undefinedReason, call_id_, conf_id_, call_ref_);
-				}
-				h245_skt_->cancel(ec);
-			}
-			h245_listen_.close(ec);
+				std::lock_guard<std::recursive_mutex> lk(mutex_);
+				bool experted = true;
+				if (!active_.compare_exchange_strong(experted, false))
+					return;
 
-			if (h225_skt_)
-			{
-				this->send_release_complete(H225_ReleaseCompleteReason::Choices::e_undefinedReason, false);
-				std::this_thread::sleep_for(std::chrono::milliseconds(500));
-				h225_skt_->close(ec);
+				rtp_.stop();
+				std::error_code ec;
+				timer_.cancel(ec);
+				if (h245_skt_)
+				{
+					this->close_local_channels();
+					this->close_remote_channels();
+					std::this_thread::sleep_for(std::chrono::milliseconds(500));
+					this->send_end_session_command();
+					std::this_thread::sleep_for(std::chrono::milliseconds(500));
+					if (gkclient_)
+					{
+						gkclient_->send_disengage_request(H225_DisengageReason::e_undefinedReason, call_id_, conf_id_, call_ref_);
+					}
+					h245_skt_->cancel(ec);
+				}
+				h245_listen_.close(ec);
+
+				if (h225_skt_)
+				{
+					this->send_release_complete(H225_ReleaseCompleteReason::Choices::e_undefinedReason, false);
+					std::this_thread::sleep_for(std::chrono::milliseconds(500));
+					h225_skt_->close(ec);
+				}
 			}
 			if (on_destroy)
 			{
@@ -1028,6 +1030,33 @@ namespace voip
 			Q931 q931;
 			q931.SetDisplayName(local_alias_);
 			q931.SetIE(Q931::InformationElementCodes::UserUserIE, stream);
+
+			PBYTEArray buffer;
+			q931.Encode(buffer);
+			PBYTEArray tpktbuf = tpkt::serialize(buffer);
+			return h225_sending_queue_->send(h225_skt_, std::string((const char*)tpktbuf.GetPointer(), tpktbuf.GetSize()));
+		}
+
+		bool h323_call::send_status(const H225_GloballyUniqueID& uuid)
+		{
+			H225_H323_UserInformation ui;
+			ui.SetTag(H225_H323_UserInformation::e_user_data);
+			ui.m_h323_uu_pdu.m_h323_message_body.SetTag(H225_H323_UU_PDU_h323_message_body::e_status);
+			ui.m_h323_uu_pdu.IncludeOptionalField(H225_H323_UU_PDU::e_h245Tunneling);
+			ui.m_h323_uu_pdu.m_h245Tunneling = h245_tunneling;
+
+			H225_Status_UUIE& uuie = (H225_Status_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
+			uuie.m_callIdentifier.m_guid = uuid;
+			uuie.m_protocolIdentifier.SetValue(H225_ProtocolID, PARRAYSIZE(H225_ProtocolID));
+
+
+			PPER_Stream stream;
+			ui.Encode(stream);
+			stream.CompleteEncoding();
+			Q931 q931;
+			q931.SetDisplayName(local_alias_);
+			q931.SetIE(Q931::InformationElementCodes::UserUserIE, stream);
+			q931.BuildStatus((int)call_ref_,direction_==direction_t::incoming);
 
 			PBYTEArray buffer;
 			q931.Encode(buffer);
@@ -2088,7 +2117,7 @@ namespace voip
 				{
 					if (ui.m_h323_uu_pdu.m_h323_message_body.GetTag() == H225_H323_UU_PDU_h323_message_body::e_setup)
 					{
-						H225_Setup_UUIE& uuie = (H225_Setup_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
+						const H225_Setup_UUIE& uuie = (const H225_Setup_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
 						on_setup(uuie, q931);
 					}
 				}
@@ -2102,8 +2131,22 @@ namespace voip
 				{
 					if (ui.m_h323_uu_pdu.m_h323_message_body.GetTag() == H225_H323_UU_PDU_h323_message_body::e_callProceeding)
 					{
-						H225_CallProceeding_UUIE& uuie = (H225_CallProceeding_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
+						const H225_CallProceeding_UUIE& uuie = (const H225_CallProceeding_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
 						on_call_proceeding(uuie);
+					}
+				}
+			}
+			else if (msg_type == Q931::MsgTypes::StatusEnquiryMsg)
+			{
+				PBYTEArray uuie_data = q931.GetIE(Q931::InformationElementCodes::UserUserIE);
+				H225_H323_UserInformation ui;
+				PPER_Stream pper_stream(uuie_data);
+				if (ui.Decode(pper_stream))
+				{
+					if (ui.m_h323_uu_pdu.m_h323_message_body.GetTag() == H225_H323_UU_PDU_h323_message_body::e_statusInquiry)
+					{
+						const H225_StatusInquiry_UUIE& uuie = (const H225_StatusInquiry_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
+						on_status_inquiry(uuie);
 					}
 				}
 			}
@@ -2116,7 +2159,7 @@ namespace voip
 				{
 					if (ui.m_h323_uu_pdu.m_h323_message_body.GetTag() == H225_H323_UU_PDU_h323_message_body::e_alerting)
 					{
-						H225_Alerting_UUIE& uuie = (H225_Alerting_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
+						const H225_Alerting_UUIE& uuie = (const H225_Alerting_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
 						on_alerting(uuie);
 					}
 				}
@@ -2144,7 +2187,7 @@ namespace voip
 				{
 					if (ui.m_h323_uu_pdu.m_h323_message_body.GetTag() == H225_H323_UU_PDU_h323_message_body::e_connect)
 					{
-						H225_Connect_UUIE& uuie = (H225_Connect_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
+						const H225_Connect_UUIE& uuie = (const H225_Connect_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
 						on_connect(uuie,q931);
 					}
 				}
@@ -2159,11 +2202,12 @@ namespace voip
 				{
 					if (ui.m_h323_uu_pdu.m_h323_message_body.GetTag() == H225_H323_UU_PDU_h323_message_body::e_releaseComplete)
 					{
-						H225_ReleaseComplete_UUIE& uuie = (H225_ReleaseComplete_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
+						const H225_ReleaseComplete_UUIE& uuie = (const H225_ReleaseComplete_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
 						on_release_complete(uuie);
 					}
 				}
 			}
+			
 			
 		}
 
@@ -2384,6 +2428,11 @@ namespace voip
 				std::string url = url_.to_string();
 				log_->debug("H.323: on_call_proceeding, url={}",url)->flush();
 			}
+		}
+
+		void h323_call::on_status_inquiry(const H225_StatusInquiry_UUIE& uuie)
+		{
+			send_status(uuie.m_callIdentifier.m_guid);
 		}
 
 		void h323_call::on_alerting(const H225_Alerting_UUIE& uuie)
@@ -2652,9 +2701,12 @@ namespace voip
 					{
 						remote_chann.media_type = media_type_unknown;
 						const H245_GenericCapability& gen = (const H245_GenericCapability&)entry.m_capability;
-						if (((const PASN_ObjectId&)(gen.m_capabilityIdentifier)) == "0.0.8.239.1.1")
+						if (gen.m_capabilityIdentifier.GetTag() == H245_CapabilityIdentifier::e_standard)
 						{
-							remote_chann.type = media_channel_type_t::h239_control;
+							if (((const PASN_ObjectId&)(gen.m_capabilityIdentifier)) == "0.0.8.239.1.1")
+							{
+								remote_chann.type = media_channel_type_t::h239_control;
+							}
 						}
 					}
 				}
