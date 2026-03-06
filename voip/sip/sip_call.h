@@ -39,6 +39,7 @@ namespace voip
 			void on_decline(const sip_message& msg);
 			void on_options(const sip_message& msg);
 			void on_response(const sip_message& msg);
+			void on_update(const sip_message& msg);
 
 			void make_call_id();
 

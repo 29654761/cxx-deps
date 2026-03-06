@@ -34,7 +34,6 @@ namespace litertp
             std::string nal;
             nal.assign((const char*)(frame + nal_start), nal_size);
             nals.push_back(nal);
-            //send_nal(duration, frame + nal_start, nal_size, islast);
         }
 
         size_t total_nal_size = 0;

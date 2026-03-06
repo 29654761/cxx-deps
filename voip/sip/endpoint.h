@@ -118,6 +118,7 @@ namespace voip
 			void on_info(sip_connection_ptr con, const sip_message& message);
 			void on_bye(sip_connection_ptr con, const sip_message& message);
 			void on_options(sip_connection_ptr con, const sip_message& message);
+			void on_update(sip_connection_ptr con, const sip_message& message);
 			void on_response(sip_connection_ptr con, const sip_message& message);
 
 		private:
@@ -143,7 +144,7 @@ namespace voip
 
 			bool incoming_audio_ = true;
 			bool incoming_video_ = true;
-			int max_bitrate_ = 1920;
+			int max_bitrate_ = 2048;
 
 			std::shared_ptr<gk_client> gkclient_;
 

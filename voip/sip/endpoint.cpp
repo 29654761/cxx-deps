@@ -449,7 +449,7 @@ namespace voip
 			}
 			req.set_max_forwards(70);
 			if (allow) {
-				req.set_allow("INVITE,ACK,OPTIONS,BYE,CANCEL,SUBSCRIBE,NOTIFY,REFER,MESSAGE,INFO,PING,PRACK");
+				req.set_allow("INVITE, ACK, OPTIONS, BYE, CANCEL, SUBSCRIBE, NOTIFY, REFER, MESSAGE, INFO, PING, PRACK, UPDATE");
 			}
 			return req;
 		}
@@ -814,6 +814,23 @@ namespace voip
 			if (call)
 			{
 				call->on_options(message);
+			}
+			else
+			{
+				auto rsp = create_response(message, nullptr, false);
+				rsp.set_status("487");
+				rsp.set_msg("Request Terminated");
+				con->send_message(rsp);
+			}
+		}
+
+		void endpoint::on_update(sip_connection_ptr con, const sip_message& message)
+		{
+			std::string call_id = message.call_id();
+			auto call = get_call(call_id);
+			if (call)
+			{
+				call->on_update(message);
 			}
 			else
 			{

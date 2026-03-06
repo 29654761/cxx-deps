@@ -43,7 +43,8 @@ namespace ffmpeg
 			/// ffmpeg -list_devices true -f dshow -i dummy
 			/// </summary>
 			bool open_audio_device(const std::string& device_name, const std::string& fmt, int samplerate, int channels,int milliseconds);
-			
+
+			virtual void interrupt();
 			virtual void close();
 			virtual bool read_packet(AVPacket* pkt);
 

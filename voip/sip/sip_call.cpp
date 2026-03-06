@@ -57,6 +57,7 @@ namespace voip
 			ms->use_rtp_address(true);
 			{
 				ms->add_local_video_track(codec_type_h264, 96, 90000, true);
+				
 				litertp::fmtp fmtp;
 				fmtp.set_packetization_mode(1);
 				fmtp.set_profile_level_id(0x420028);
@@ -91,7 +92,7 @@ namespace voip
 				return false;
 			}
 			ms->use_rtp_address(true);
-			ms->add_local_video_track(codec_type_h265, 96, 90000, true);
+			ms->add_local_video_track(codec_type_h265, 100, 90000, false);
 			litertp::fmtp fmtp;
 			fmtp.set_profile_id(1);
 			fmtp.set_level_id(0x0093);
@@ -99,7 +100,7 @@ namespace voip
 			fmtp.set_mfs(8192);
 			fmtp.set_mbr(1920);
 			fmtp.set_level_asymmetry_allowed(1);
-			ms->set_local_fmtp(96, fmtp);
+			ms->set_local_fmtp(100, fmtp);
 
 			return true;
 		}
@@ -547,6 +548,22 @@ namespace voip
 			}
 		}
 
+		void sip_call::on_update(const sip_message& msg)
+		{
+			auto con = get_con();
+			if (con)
+			{
+				sip_address contact;
+				make_contact(contact);
+				auto rsp = ep_->create_response(msg, &contact, false);
+				for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+				{
+					rsp.headers.add("Record-Route", *itr);
+				}
+				con->send_message(rsp);
+			}
+		}
+
 		bool sip_call::invite()
 		{
 			auto con = get_con();
@@ -582,6 +599,7 @@ namespace voip
 			sdp.b.push_back("CT:" + std::to_string(max_bitrate_));
 			for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
 			{
+				itr->rtcp_rsize = false;
 				if (itr->media_type == media_type_video)
 				{
 					itr->b.push_back("AS:" + std::to_string(max_bitrate_));
@@ -591,7 +609,23 @@ namespace voip
 				itr->protos.erase("UDP");
 			}
 			std::string s = sdp.to_string();
-
+			//std::stringstream ss;
+			//ss << "v=0\r\n";
+			//ss << "o=- 20005 20005 IN IP4 125.118.73.10\r\n";
+			//ss << "s=SDP data\r\n";
+			//ss << "c=IN IP4 125.118.73.10\r\n";
+			//ss << "b=AS:2048\r\n";
+			//ss << "t=0 0\r\n";
+			//ss << "m=audio "<< sdp.medias[0].rtp_port << " RTP/AVP 8\r\n";
+			//ss << "a=rtpmap:8 PCMA/8000\r\n";
+			//ss << "a=sendrecv\r\n";
+			//ss << "m=video " << sdp.medias[1].rtp_port << " RTP/AVP 96\r\n";
+			//ss << "b=TIAS:2048000\r\n";
+			//ss << "a=rtpmap:96 H264/90000\r\n";
+			//ss << "a=fmtp:96 profile-level-id=428029; max-mbps=245760; max-fs=8192; packetization-mode=1\r\n";
+			//ss << "a=rtcp-fb:* ccm fir\r\n";
+			//ss << "a=sendrecv\r\n";
+			//std::string s = ss.str();
 			req.set_body(s);
 			return con->send_message(req);
 		}

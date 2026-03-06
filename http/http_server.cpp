@@ -135,7 +135,6 @@ void http_server::handle_accepted(http_server_ptr svr, const asio::error_code& e
 
 void http_server::handle_ssl_accepted(http_server_ptr svr, const asio::error_code& ec, asio::ip::tcp::socket socket)
 {
-
 	auto self = this->shared_from_this();
 	if (!ec)
 	{

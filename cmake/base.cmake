@@ -10,7 +10,8 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 
 elseif(CMAKE_SYSTEM_NAME MATCHES "Linux")
     SET(ABI "linux")
-
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    SET(ABI "wasm")
 endif()
 
 string(TOLOWER ${CMAKE_BUILD_TYPE} CONFIG)

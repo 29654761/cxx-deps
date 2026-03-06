@@ -105,6 +105,11 @@ namespace ffmpeg
 			return ret;
 		}
 
+		void reader::interrupt()
+		{
+			active_ = false;
+		}
+
 		void reader::close()
 		{
 			active_ = false;

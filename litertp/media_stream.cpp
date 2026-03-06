@@ -72,22 +72,22 @@ namespace litertp
 		ssrct.msid = local_sdp_media_.msid;
 		local_sdp_media_.ssrcs.push_back(ssrct);
 
-		if (media_type == media_type_video || media_type == media_type_audio)
-		{
-			//For RTX
-			uint32_t ssrc2 = sys::util::random_number<uint32_t>(0x10000, 0xFFFFFFFF);
-			while (ssrc2 == ssrc)
-			{
-				ssrc2 = sys::util::random_number<uint32_t>(0x10000, 0xFFFFFFFF);
-			}
-			ssrc_t ssrct2;
-			ssrct2.ssrc = ssrc2;
-			ssrct2.cname = cname_;
-			ssrct2.msid = local_sdp_media_.msid;
-			local_sdp_media_.ssrcs.push_back(ssrct2);
+		//if (media_type == media_type_video || media_type == media_type_audio)
+		//{
+		//	//For RTX
+		//	uint32_t ssrc2 = sys::util::random_number<uint32_t>(0x10000, 0xFFFFFFFF);
+		//	while (ssrc2 == ssrc)
+		//	{
+		//		ssrc2 = sys::util::random_number<uint32_t>(0x10000, 0xFFFFFFFF);
+		//	}
+		//	ssrc_t ssrct2;
+		//	ssrct2.ssrc = ssrc2;
+		//	ssrct2.cname = cname_;
+		//	ssrct2.msid = local_sdp_media_.msid;
+		//	local_sdp_media_.ssrcs.push_back(ssrct2);
 
-			local_sdp_media_.ssrc_group = "FID";
-		}
+		//	local_sdp_media_.ssrc_group = "FID";
+		//}
 
 		transport_rtp_ = transport_rtp;
 		transport_rtp_->rtp_packet_event_.add(s_transport_rtp_packet, this);
