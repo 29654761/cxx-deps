@@ -154,8 +154,7 @@ namespace ffmpeg
 			{
 				if (format_->pb)
 				{
-					avio_close(format_->pb);
-					format_->pb = nullptr;
+					avio_closep(&format_->pb);
 				}
 
 				avformat_free_context(format_);
@@ -172,8 +171,7 @@ namespace ffmpeg
 			{
 				if (format_->pb)
 				{
-					avio_close(format_->pb);
-					format_->pb = nullptr;
+					avio_closep(&format_->pb);
 				}
 
 				avformat_free_context(format_);
@@ -187,6 +185,10 @@ namespace ffmpeg
 			int r = avformat_alloc_output_context2(&format_, nullptr, sfmt, url_.c_str());
 			if (r < 0)
 			{
+				if (log_)
+				{
+					log_->error("avformat_alloc_output_context2 failed, url={}",url_)->flush();
+				}
 				return false;
 			}
 
@@ -200,13 +202,18 @@ namespace ffmpeg
 					if (stream)
 					{
 						avcodec_parameters_copy(stream->codecpar, pms);
+						stream->duration = 0;
 					}
 				}
 			}
 
-			r = avio_open2(&format_->pb, url_.c_str(), avio_flags, nullptr, nullptr);
+			r = avio_open2(&format_->pb, url_.c_str(), avio_flags| AVIO_FLAG_READ_WRITE, nullptr, nullptr);
 			if (r < 0)
 			{
+				if (log_)
+				{
+					log_->error("avio_open2 failed, url={}", url_)->flush();
+				}
 				avformat_free_context(format_);
 				return false;
 			}
@@ -214,17 +221,49 @@ namespace ffmpeg
 			return true;
 		}
 
+//avformat_alloc_output_context2(&oc, NULL, "segment", "output_%03d.mp4");
+//oformat = av_guess_format("segment", NULL, NULL);
+//av_opt_set(oc->priv_data, "segment_time", "10", 0);
+//av_opt_set(oc->priv_data, "segment_format", "mp4", 0);
+//av_opt_set(oc->priv_data, "reset_timestamps", "1", 0);
+
 		bool writer::write_header()
 		{
 			std::lock_guard<std::recursive_mutex> lk(mutex_);
 			if (!format_)
 				return false;
 
-			int r = avformat_write_header(format_, nullptr);
+			const char* fmt = format_->oformat->name;
+
+			AVDictionary* opts = nullptr;
+
+			if (strcmp(fmt, "mp4") == 0 ||
+				strcmp(fmt, "mov") == 0)
+			{
+				AVStream* vs = find_stream(AVMEDIA_TYPE_VIDEO);
+				if (vs)
+				{
+					av_dict_set(&opts, "movflags", "frag_keyframe+empty_moov", 0);
+				}
+				else
+				{
+					av_dict_set(&opts, "movflags", "empty_moov", 0);
+					av_dict_set(&opts, "frag_duration", "1000000", 0); //1s
+					//av_dict_set(&opts, "frag_size", "50000", 0);  //
+				}
+			}
+
+			int r = avformat_write_header(format_, &opts);
+			av_dict_free(&opts);
 			if (r < 0)
 			{
 				char err[64] = {};
 				av_make_error_string(err, 64, r);
+
+				if (log_)
+				{
+					log_->error("avformat_write_header failed,err={}, url={}",err, url_)->flush();
+				}
 				return false;
 			}
 			return true;
