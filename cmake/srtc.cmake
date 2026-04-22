@@ -28,7 +28,7 @@ elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
         )
 
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            "${CXX_BUILD}/srtc/linux-amd64/librtc.a"
+            "${CXX_BUILD}/srtc/linux-amd64/librtc.so"
         )
 
     elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
@@ -38,7 +38,7 @@ elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
         )
 
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            "${CXX_BUILD}/srtc/linux-arm64/librtc.a"
+            "${CXX_BUILD}/srtc/linux-arm64/librtc.so"
         )
 
     else()

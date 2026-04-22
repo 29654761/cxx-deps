@@ -3,27 +3,26 @@
 include("${CXX_DEPS}/cmake/base.cmake")
 
 
-SET(ONNX_ROOT "${CXX_BUILD}/onnx-runtime")
+SET(ROOT "${CXX_BUILD}/GPUPixel")
 
-message("ONNX_ROOT: ${ONNX_ROOT}")
+message("ROOT: ${ROOT}")
 message("ABI: ${ABI}")
 message("CONFIG: ${CONFIG}")
 
 
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
     set(LIBS
-        "${ONNX_ROOT}/out/${ABI}-${CONFIG}/lib/onnxruntime.lib"
+        "${ROOT}/out/${ABI}-${CONFIG}/lib/gpupixel.lib"
     )
 else()
     set(LIBS
-        "${ONNX_ROOT}/out/${ABI}-${CONFIG}/lib/onnxruntime.a"
+        "${ROOT}/out/${ABI}-${CONFIG}/lib/gpupixel.so"
     )
 endif()
 
-message("============>ONNXLibs:${LIBS}")
 
 target_include_directories(${PROJECT_NAME} PUBLIC
-    ${ONNX_ROOT}/out/${ABI}-${CONFIG}/include/onnxruntime
+    ${ROOT}/out/${ABI}-${CONFIG}/include
 )
 
 target_link_libraries(${PROJECT_NAME}
