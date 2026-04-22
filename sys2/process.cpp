@@ -1,14 +1,67 @@
 #include "process.h"
 #include <iostream>
 #include <fstream>
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#elif __linux__
+#include <sstream>
+#include <vector>
+
+#ifdef __linux__
+extern char** environ;
 #endif
 
 namespace sys
 {
+    process::process()
+    {
+
+#ifdef _WIN32
+        memset(&pi_, 0, sizeof(pi_));
+#elif __linux__
+#endif
+    }
+
+    process::~process()
+    {
+
+    }
+
+    bool process::start(const std::string& cmd, const std::string& args)
+    {
+        std::vector<std::string> args_vec;
+        args_vec.push_back(cmd); // argv[0]
+
+        std::istringstream iss(args);
+        std::string token;
+        while (iss >> token) {
+            args_vec.push_back(token);
+        }
+
+
+        std::vector<char*> argv;
+        argv.reserve(args_vec.size() + 1);
+
+        for (auto& s : args_vec) {
+            argv.push_back(const_cast<char*>(s.c_str()));
+        }
+        argv.push_back(nullptr);
+
+#ifdef _WIN32
+        return start_win(cmd,args);
+#elif __linux__
+        return start_linux(cmd,args);
+#else
+        return false;
+#endif
+    }
+
+    void process::stop()
+    {
+#ifdef _WIN32
+        stop_win();
+#elif __linux__
+        stop_linux();
+#endif
+    }
+
     int64_t process::run(const std::string& cmd, std::string* output)
     {
 #ifdef _WIN32
@@ -88,6 +141,34 @@ namespace sys
 
         return dwExitCode;
     }
+
+    bool process::start_win(const std::string& cmd, const std::string& args)
+    {
+        STARTUPINFO si = { sizeof(si) };
+        std::string c = cmd + " " + args;
+        return CreateProcessA(
+            NULL,
+            (char*)c.c_str(),
+            NULL, NULL, FALSE,
+            0, NULL, NULL,
+            &si, &pi_
+        );
+    }
+
+    void process::stop_win()
+    {
+        if (pi_.hProcess) 
+        {
+            TerminateProcess(pi_.hProcess, 0);
+            CloseHandle(pi_.hProcess);
+        }
+        if (pi_.hThread)
+        {
+            CloseHandle(pi_.hThread);
+        }
+		memset(&pi_, 0, sizeof(pi_));
+
+    }
 #elif __linux__
 
     int64_t process::run_linux(const std::string& cmd, std::string* output)
@@ -113,6 +194,47 @@ namespace sys
         int exitCode = WEXITSTATUS(status);
 
         return exitCode;
+    }
+
+    bool process::start_linux(const std::string& cmd, const std::string& args)
+    {
+        std::vector<std::string> args_vec;
+        args_vec.push_back(cmd); // argv[0]
+
+        std::istringstream iss(args);
+        std::string token;
+        while (iss >> token) {
+            args_vec.push_back(token);
+        }
+
+
+        std::vector<char*> argv;
+        argv.reserve(args_vec.size() + 1);
+
+        for (auto& s : args_vec) {
+            argv.push_back(const_cast<char*>(s.c_str()));
+        }
+        argv.push_back(nullptr);
+
+
+        int ret = posix_spawnp(
+            &pid_,
+            cmd.c_str(),
+            nullptr,   // file_actions
+            nullptr,   // attr
+            argv.data(),
+            environ    // 继承环境变量
+        );
+
+        return ret==0;
+    }
+
+    void process::stop_linux()
+    {
+        if (pid_ >= 0) 
+        {
+            kill(pid_, SIGTERM);
+        }
     }
 
 #endif
