@@ -76,8 +76,11 @@ namespace voip
 			bool is_gk_client_ = false;
 			endpoint_ptr ep_;
 			asio::steady_timer timer_;
+
+			mutable std::mutex con_mutex_;
 			sip_connection_ptr con_tmp_;
 			sip_connection_ptr con_;
+
 			std::atomic<uint32_t> cseq_base_;
 			std::string call_id_;
 			std::string my_tag_;
@@ -96,6 +99,8 @@ namespace voip
 
 			std::string video_mid_;
 			std::string audio_mid_;
+
+
 		};
 
 

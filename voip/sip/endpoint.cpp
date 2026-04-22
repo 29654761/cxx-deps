@@ -381,17 +381,14 @@ namespace voip
 
 		std::shared_ptr<sip_call> endpoint::find_call_by_connection(const std::string& con_id)
 		{
+			std::vector<std::shared_ptr<sip_call>> calls;
+			this->all_calls(calls);
 			std::shared_ptr<sip_call> call;
-			std::lock_guard<std::recursive_mutex> lk(calls_mutex_);
-			for (auto itr = calls_.begin(); itr != calls_.end(); itr++)
+			for (auto itr = calls.begin(); itr != calls.end(); itr++)
 			{
-				if (itr->second)
+				if ((*itr)->con_id() == con_id)
 				{
-					if (itr->second->con_id() == con_id)
-					{
-						call = itr->second;
-						break;
-					}
+					call = *itr;
 				}
 			}
 

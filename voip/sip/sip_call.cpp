@@ -92,7 +92,7 @@ namespace voip
 				return false;
 			}
 			ms->use_rtp_address(true);
-			ms->add_local_video_track(codec_type_h265, 100, 90000, false);
+			ms->add_local_video_track(codec_type_h265, 100, 90000, true);
 			litertp::fmtp fmtp;
 			fmtp.set_profile_id(1);
 			fmtp.set_level_id(0x0093);
@@ -215,33 +215,30 @@ namespace voip
 
 		void sip_call::stop(voip::call::reason_code_t reason)
 		{
-			sip_connection_ptr con;
+			bool experted = true;
+			if (!active_.compare_exchange_strong(experted, false))
+				return;
+
+			rtp_.stop();
+			std::error_code ec;
+			timer_.cancel(ec);
+
+			sip_connection_ptr con = get_con();
+			if (con)
 			{
-				std::lock_guard<std::recursive_mutex> lk(mutex_);
-				bool experted = true;
-				if (!active_.compare_exchange_strong(experted, false))
-					return;
-
-				rtp_.stop();
-				std::error_code ec;
-				timer_.cancel(ec);
-
-				con = get_con();
-				if (con)
+				if (got_ack)
 				{
-					if (got_ack)
+					for (int i = 0; i < 3; i++)
 					{
-						for (int i = 0; i < 3; i++)
-						{
-							if (got_bye)
-								break;
-							bye();
-							std::this_thread::sleep_for(std::chrono::seconds(1));
-						}
+						if (got_bye)
+							break;
+						bye();
+						std::this_thread::sleep_for(std::chrono::seconds(1));
 					}
 				}
-				clear_con();
 			}
+			clear_con();
+
 			if (!is_gk_client_)
 			{
 				if (con)
@@ -915,7 +912,7 @@ namespace voip
 
 		void sip_call::set_con(sip_connection_ptr con)
 		{
-			std::lock_guard<std::recursive_mutex> lk(mutex_);
+			std::lock_guard<std::mutex> lk(con_mutex_);
 			if (con)
 			{
 				auto self = shared_from_this();
@@ -926,13 +923,13 @@ namespace voip
 
 		sip_connection_ptr sip_call::get_con()const
 		{
-			std::lock_guard<std::recursive_mutex> lk(mutex_);
+			std::lock_guard<std::mutex> lk(con_mutex_);
 			return con_;
 		}
 
 		void sip_call::clear_con()
 		{
-			std::lock_guard<std::recursive_mutex> lk(mutex_);
+			std::lock_guard<std::mutex> lk(con_mutex_);
 			if (con_)
 			{
 				con_->set_close_handler(nullptr);
