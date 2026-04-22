@@ -1,6 +1,8 @@
 #include "rtc_client.h"
+#include <sys2/util.h>
 
-rtc_client::rtc_client()
+rtc_client::rtc_client(asio::io_service& ios)
+	:ios_(ios), timer_(ios)
 {
 	connection_state_ = 2;
 }
@@ -12,6 +14,9 @@ rtc_client::~rtc_client()
 bool rtc_client::open()
 {
 	std::lock_guard<std::mutex> lock(mutex_);
+	if (active_)
+		return false;
+	active_ = true;
 	if (handle_)
 		return false;
 
@@ -23,11 +28,18 @@ bool rtc_client::open()
 	rtc_set_user_event_callback(handle_, s_rtc_user_event_callback, this);
 	rtc_set_track_event_callback(handle_, s_rtc_track_event_callback, this);
 	rtc_set_track_sample_callback(handle_, s_rtc_track_sample_callback, this);
+
+	timer_.expires_after(std::chrono::seconds(1));
+	timer_.async_wait(std::bind(&rtc_client::handle_timer, shared_from_this(), std::placeholders::_1));
 	return true;
 }
 
 void rtc_client::close()
 {
+	active_ = false;
+	asio::error_code ec;
+	timer_.cancel(ec);
+
 	void* h = nullptr;
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
@@ -41,6 +53,7 @@ void rtc_client::close()
 	if (h)
 	{
 		rtc_destroy(h);
+		std::this_thread::sleep_for(std::chrono::seconds(2));// avoid crashing when rtc still callback
 	}
 }
 
@@ -61,7 +74,12 @@ bool rtc_client::join_channel(const char* token)
 		return false;
 	connection_state_ = 0;
 	signal_.reset();
-	int r=rtc_join_channel(handle_, (char*)token);
+	int r= rtc_join_channel_sync(handle_, (char*)token,30000);
+	//int r = rtc_join_channel(handle_, (char*)token);
+	if (log_)
+	{
+		log_->debug("Join channel result={}", r)->flush();
+	}
 	if (r != RTC_OK)
 	{
 		connection_state_ = 2;
@@ -91,6 +109,12 @@ bool rtc_client::subscribe_audio(const char* uid, const char* track_id)
 		return false;
 
 	int r = rtc_subscribe_audio(handle_,uid,track_id);
+
+	if (log_)
+	{
+		log_->debug("Subscribe audio uid={}, trackid={}, result={}",uid,track_id, r)->flush();
+	}
+
 	if (r != RTC_OK)
 		return false;
 
@@ -104,10 +128,82 @@ bool rtc_client::subscribe_video(const char* uid, const char* track_id)
 		return false;
 
 	int r = rtc_subscribe_video(handle_,uid, track_id);
+	if (log_)
+	{
+		log_->debug("Subscribe video uid={}, trackid={}, result={}", uid, track_id, r)->flush();
+	}
 	if (r != RTC_OK)
 		return false;
 
 	return true;
+}
+
+bool rtc_client::subscribe_by_desc(const char* uid, const char* tdesc)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!handle_)
+		return false;
+
+	rtc_user_info_t user = {};
+	int r = rtc_get_user_info(handle_, uid, &user);
+	if (r != RTC_OK)
+	{
+		if (log_)
+		{
+			log_->error("Subscribe by desc failed uid={}, tdesc={}, result=no user info", uid, tdesc)->flush();
+		}
+		return false;
+	}
+	for (int i = 0; i < user.stream_track_count; ++i)
+	{
+		if (strcmp(user.stream_tracks[i].desc, tdesc) == 0)
+		{
+			if (user.stream_tracks[i].kind == 0)
+			{
+				int r = rtc_subscribe_audio(handle_, uid, user.stream_tracks[i].track_id);
+				if (log_)
+				{
+					if (r != RTC_OK)
+					{
+						log_->error("Subscribe audio failed chan={},uid={},name={}, tdesc={}, result={}",std::string(user.channel,128).c_str(), uid, std::string(user.name, 128).c_str(), tdesc, r)->flush();
+					}
+					else
+					{
+						log_->info("Subscribe audio ok chan={},uid={},name={},, tdesc={}, result={}", std::string(user.channel, 128).c_str(), uid, std::string(user.name, 128).c_str(), tdesc, r)->flush();
+					}
+				}
+				rtc_free_user_info(&user);
+				return r == RTC_OK;
+			}
+			else if (user.stream_tracks[i].kind == 1)
+			{
+				int r = rtc_subscribe_video(handle_, uid, user.stream_tracks[i].track_id);
+				if (log_)
+				{
+					if (r != RTC_OK)
+					{
+						log_->error("Subscribe video failed chan={},uid={},name={}, tdesc={},tid={}, result={}", std::string(user.channel, 128).c_str(), uid , std::string(user.name, 128).c_str(), tdesc, std::string(user.stream_tracks[i].track_id,64), r)->flush();
+					}
+					else
+					{
+						log_->info("Subscribe video ok chan={},uid={},name={},, tdesc={},tid={}, result={}", std::string(user.channel, 128).c_str(), uid, std::string(user.name, 128).c_str(), tdesc, std::string(user.stream_tracks[i].track_id,64), r)->flush();
+					}
+				}
+				rtc_free_user_info(&user);
+				return r == RTC_OK;
+			}
+		}
+	}
+
+	rtc_free_user_info(&user);
+
+	if (log_)
+	{
+		log_->error("Subscribe by desc failed chan={},uid={},name={}, tdesc={}, result={}", std::string(user.channel, 128).c_str(), uid, std::string(user.name, 128).c_str(), tdesc, r)->flush();
+	}
+
+
+	return false;
 }
 
 bool rtc_client::unsubscribe(const char* uid, const char* track_id)
@@ -121,6 +217,156 @@ bool rtc_client::unsubscribe(const char* uid, const char* track_id)
 		return false;
 
 	return true;
+}
+
+bool rtc_client::unsubscribe_by_desc(const char* uid, const char* tdesc)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!handle_)
+		return false;
+
+	rtc_user_info_t user = {};
+	int r = rtc_get_user_info(handle_, uid, &user);
+	if (r != RTC_OK)
+		return false;
+
+	for (int i = 0; i < user.stream_track_count; ++i)
+	{
+		if (strcmp(user.stream_tracks[i].desc, tdesc) == 0)
+		{
+			int r=rtc_unsubscribe(handle_, uid, user.stream_tracks[i].track_id);
+			rtc_free_user_info(&user);
+			return r == RTC_OK;
+		}
+	}
+
+	rtc_free_user_info(&user);
+	return false;
+}
+
+bool rtc_client::subscribe_all_items()
+{
+	std::vector<subscribe_item> items;
+	all_subscribes(items);
+
+	for (auto itr = items.begin(); itr != items.end(); itr++)
+	{
+		if (!itr->result)
+		{
+			bool result=subscribe_by_desc(itr->uid.c_str(), itr->tdesc.c_str());
+			set_subscribe_result(itr->uid.c_str(), itr->tdesc.c_str(), result);
+		}
+	}
+
+	return true;
+}
+
+void rtc_client::set_subscribe_result(const char* uid, const char* tdesc, bool result)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	for (auto itr = subscribe_items_.begin(); itr != subscribe_items_.end(); itr++)
+	{
+		if (itr->uid == uid)
+		{
+			if (tdesc)
+			{
+				if (itr->tdesc == tdesc)
+				{
+					itr->result = result;
+				}
+			}
+			else
+			{
+				itr->result = result;
+			}
+		}
+	}
+	
+}
+
+void rtc_client::set_all_subscribe_result(bool result)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	for (auto itr = subscribe_items_.begin(); itr != subscribe_items_.end(); itr++)
+	{
+		itr->result = result;
+	}
+}
+
+bool rtc_client::add_subscribe(const char* uid, const char* tdesc)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	auto itr=std::find_if(subscribe_items_.begin(), subscribe_items_.end(),
+		[uid,tdesc](const subscribe_item& a) {
+		return a.uid == uid && a.tdesc == tdesc;
+	});
+	if (itr == subscribe_items_.end())
+	{
+		subscribe_item item = {};
+		item.uid = uid;
+		item.tdesc = tdesc;
+		item.result = false;
+		subscribe_items_.push_back(item);
+	}
+	else
+	{
+		itr->result = false;
+	}
+	if (log_)
+	{
+		log_->debug("Add subscribe uid={}, tdesc={}", uid,tdesc)->flush();
+	}
+	return true;
+}
+
+bool rtc_client::remove_subscribe(const char* uid, const char* tdesc)
+{
+	subscribe_item item = {};
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+
+		auto itr = std::find_if(subscribe_items_.begin(), subscribe_items_.end(),
+			[uid, tdesc](const subscribe_item& a) {
+			return a.uid == uid && a.tdesc == tdesc;
+		});
+
+		if (itr == subscribe_items_.end())
+			return false;
+		item = *itr;
+		subscribe_items_.erase(itr);
+	}
+
+	unsubscribe_by_desc(item.uid.c_str(), item.tdesc.c_str());
+
+	if (log_)
+	{
+		log_->debug("Remove subscribe uid={}, tdesc={}", uid, tdesc)->flush();
+	}
+	return true;
+}
+
+void rtc_client::clear_subscribes()
+{
+	std::vector<subscribe_item> items;
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		items = subscribe_items_;
+		subscribe_items_.clear();
+	}
+
+	for (auto itr = items.begin(); itr != items.end(); itr++)
+	{
+		if (itr->result)
+		{
+			unsubscribe_by_desc(itr->uid.c_str(), itr->tdesc.c_str());
+		}
+	}
+}
+
+void rtc_client::all_subscribes(std::vector<subscribe_item>& subs)const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	subs = subscribe_items_;
 }
 
 bool rtc_client::all_users(std::vector<rtc_user>& users)
@@ -183,6 +429,14 @@ void rtc_client::s_rtc_connection_callback(
 {
 	rtc_client* p = (rtc_client*)context;
 	p->connection_state_ = state;
+
+	if (state == 1)
+	{
+		p->ios_.post([p]() {
+			p->set_all_subscribe_result(false);
+		});
+	}
+
 	p->connection_event.invoke(state);
 
 	p->signal_.notify();
@@ -195,6 +449,14 @@ void rtc_client::s_rtc_user_event_callback(
 )
 {
 	rtc_client* p = (rtc_client*)context;
+
+	if (event_type == 0)
+	{
+		p->ios_.post([p,uid]() {
+			p->set_subscribe_result(uid, nullptr, false);
+		});
+	}
+
 	p->user_event.invoke(uid, event_type);
 }
 
@@ -206,6 +468,13 @@ void rtc_client::s_rtc_track_event_callback(
 )
 {
 	rtc_client* p = (rtc_client*)context;
+	if (event_type == 0)
+	{
+		p->ios_.post([p, uid, track_info]() {
+			p->set_subscribe_result(uid, track_info->desc, false);
+		});
+		
+	}
 	p->track_event.invoke(uid, track_info, event_type);
 }
 
@@ -221,4 +490,15 @@ void rtc_client::s_rtc_track_sample_callback(
 {
 	rtc_client* p = (rtc_client*)context;
 	p->track_sample.invoke(user_info, track_info, data, len, timestamp, duration);
+}
+
+void rtc_client::handle_timer(const asio::error_code& ec)
+{
+	if (!active_ || ec)
+		return;
+
+	subscribe_all_items();
+
+	timer_.expires_after(std::chrono::seconds(1));
+	timer_.async_wait(std::bind(&rtc_client::handle_timer,shared_from_this(),std::placeholders::_1));
 }
