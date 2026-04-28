@@ -12,11 +12,11 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
     )
 
     target_link_libraries(${PROJECT_NAME} PUBLIC
+        "${ROOT}/win/lib/win-${ABI}-${CONFIG}/lib/avutil-58.lib"
         "${ROOT}/win/lib/win-${ABI}-${CONFIG}/lib/avdevice-60.lib"
         "${ROOT}/win/lib/win-${ABI}-${CONFIG}/lib/avfilter-9.lib"
         "${ROOT}/win/lib/win-${ABI}-${CONFIG}/lib/avformat-60.lib"
         "${ROOT}/win/lib/win-${ABI}-${CONFIG}/lib/avcodec-60.lib"
-        "${ROOT}/win/lib/win-${ABI}-${CONFIG}/lib/avutil-58.lib"
         "${ROOT}/win/lib/win-${ABI}-${CONFIG}/lib/postproc-57.lib"
         "${ROOT}/win/lib/win-${ABI}-${CONFIG}/lib/swresample-4.lib"
         "${ROOT}/win/lib/win-${ABI}-${CONFIG}/lib/swscale-7.lib"

@@ -33,7 +33,8 @@ namespace ffmpeg
 			void set_logger(spdlogger_ptr log) { log_ = log; }
 			bool is_active()const { return active_; }
 
-			virtual bool open(const std::string& url, const std::string& fmt = "");
+
+			virtual bool open(const std::string& url, const std::string& fmt = "", int segment = 0);
 			virtual void close();
 			virtual bool reopen();
 			virtual bool write_header();
@@ -44,14 +45,18 @@ namespace ffmpeg
 
 			static uint64_t read_duration(const std::string& file);
 			static uint64_t read_size(const std::string& file);
+
 		private:
 			static int s_interrupt_cb(void* ctx);
+			static std::string template_filename(const std::string& url);
+			
 		protected:
 			spdlogger_ptr log_;
 			mutable std::recursive_mutex mutex_;
 			int avio_flags = 0;
 			std::string url_;
 			std::string fmt_;
+			int segment_ = 0;
 			AVFormatContext* format_ = nullptr;
 			std::vector<AVCodecParameters*> streams_par_;
 			bool active_ = false;

@@ -3,6 +3,7 @@
 #include <sys2/util.h>
 #include <sys2/fs.h>
 
+
 namespace ffmpeg
 {
 	namespace formats
@@ -99,7 +100,7 @@ namespace ffmpeg
 			return format_->nb_streams;
 		}
 
-		bool writer::open(const std::string& url, const std::string& fmt)
+		bool writer::open(const std::string& url, const std::string& fmt, int segment)
 		{
 			std::lock_guard<std::recursive_mutex> lk(mutex_);
 			if (active_)
@@ -107,10 +108,19 @@ namespace ffmpeg
 			active_ = true;
 			url_ = url;
 			fmt_ = fmt;
-			const char* sfmt = nullptr;
-			if (fmt_.size() > 0)
-				sfmt = fmt_.c_str();
+			segment_ = segment;
 
+			const char* sfmt = nullptr;
+			if (segment_>0)
+			{
+				sfmt = "segment";
+				url_ = template_filename(url_);
+			}
+			else
+			{
+				if (fmt_.size() > 0)
+					sfmt = fmt_.c_str();
+			}
 
 			int r = avformat_alloc_output_context2(&format_, nullptr, sfmt, url_.c_str());
 			if (r < 0)
@@ -135,12 +145,14 @@ namespace ffmpeg
 				}
 			}
 
-
-			r = avio_open2(&format_->pb, url_.c_str(), avio_flags| AVIO_FLAG_READ_WRITE, nullptr, nullptr);
-			if (r < 0)
+			if (segment_ <= 0)
 			{
-				close();
-				return false;
+				r = avio_open2(&format_->pb, url_.c_str(), avio_flags | AVIO_FLAG_READ_WRITE, nullptr, nullptr);
+				if (r < 0)
+				{
+					close();
+					return false;
+				}
 			}
 			bytes_rate_ = 0;
 			return true;
@@ -179,8 +191,16 @@ namespace ffmpeg
 			}
 
 			const char* sfmt = nullptr;
-			if (fmt_.size() > 0)
-				sfmt = fmt_.c_str();
+			if (segment_>0)
+			{
+				sfmt = "segment";
+			}
+			else
+			{
+				if (fmt_.size() > 0)
+					sfmt = fmt_.c_str();
+			}
+
 
 			int r = avformat_alloc_output_context2(&format_, nullptr, sfmt, url_.c_str());
 			if (r < 0)
@@ -221,11 +241,7 @@ namespace ffmpeg
 			return true;
 		}
 
-//avformat_alloc_output_context2(&oc, NULL, "segment", "output_%03d.mp4");
-//oformat = av_guess_format("segment", NULL, NULL);
-//av_opt_set(oc->priv_data, "segment_time", "10", 0);
-//av_opt_set(oc->priv_data, "segment_format", "mp4", 0);
-//av_opt_set(oc->priv_data, "reset_timestamps", "1", 0);
+
 
 		bool writer::write_header()
 		{
@@ -243,7 +259,7 @@ namespace ffmpeg
 				AVStream* vs = find_stream(AVMEDIA_TYPE_VIDEO);
 				if (vs)
 				{
-					av_dict_set(&opts, "movflags", "frag_keyframe+empty_moov", 0);
+					//av_dict_set(&opts, "movflags", "frag_keyframe+empty_moov+default_base_moof+separate_moof", 0);
 				}
 				else
 				{
@@ -252,8 +268,34 @@ namespace ffmpeg
 					//av_dict_set(&opts, "frag_size", "50000", 0);  //
 				}
 			}
+			else if (strcmp(fmt, "segment") == 0)
+			{
+				av_dict_set_int(&opts, "segment_time",segment_, 0);
+				av_dict_set(&opts, "segment_format", fmt_.c_str(), 0);
+				av_dict_set(&opts, "reset_timestamps", "1", 0);
+
+				AVStream* vs = find_stream(AVMEDIA_TYPE_VIDEO);
+				if (vs)
+				{
+					//av_dict_set(&opts, "segment_format_options", "movflags=frag_keyframe+empty_moov+default_base_moof+separate_moof", 0);
+				}
+				else
+				{
+					av_dict_set(&opts,"segment_format_options","movflags=empty_moov:frag_duration=1000000",0);
+				}
+			}
+
 
 			int r = avformat_write_header(format_, &opts);
+			// Check Options
+			AVDictionaryEntry* t = nullptr;
+			while ((t = av_dict_get(opts, "", t, AV_DICT_IGNORE_SUFFIX)))
+			{
+				if (log_)
+				{
+					log_->warn("unused option {}={}", t->key, t->value)->flush();
+				}
+			}
 			av_dict_free(&opts);
 			if (r < 0)
 			{
@@ -266,6 +308,7 @@ namespace ffmpeg
 				}
 				return false;
 			}
+
 			return true;
 		}
 
@@ -284,7 +327,7 @@ namespace ffmpeg
 			if (!format_)
 				return false;
 
-			int r = av_write_frame(format_, pkt);
+			int r = av_interleaved_write_frame(format_, pkt);
 			if (r < 0) {
 				return false;
 			}
@@ -327,6 +370,36 @@ namespace ffmpeg
 		{
 			writer* p = (writer*)ctx;
 			return p->active_ ? 0 : 1;
+		}
+
+		std::string writer::template_filename(const std::string& url)
+		{
+			// find last path separator to isolate filename
+			std::size_t sep = url.find_last_of("/\\");
+			std::string dir;
+			std::string name;
+			if (sep == std::string::npos)
+			{
+				name = url;
+			}
+			else
+			{
+				dir = url.substr(0, sep + 1); // include separator
+				name = url.substr(sep + 1);
+			}
+
+			// find last dot in filename (but ignore leading dot which indicates hidden files)
+			std::size_t dot = name.find_last_of('.');
+			if (dot != std::string::npos && dot > 0)
+			{
+				// insert before extension
+				return dir + name.substr(0, dot) + "_%d" + name.substr(dot);
+			}
+			else
+			{
+				// no extension (or dot is the first char), append pattern
+				return dir + name + "_%d";
+			}
 		}
 	}
 }
