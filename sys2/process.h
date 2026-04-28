@@ -21,7 +21,7 @@ namespace sys
 
 		bool start(const std::string& cmd, const std::string& args);
 		void stop();
-
+		bool is_running();
 
 	private:
 #ifdef _WIN32

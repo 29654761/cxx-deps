@@ -15,24 +15,24 @@ namespace sys {
 
 	void traffic_stat::reset()
 	{
-		cur_bytes_ = 0;
-		total_bytes_ = 0;
+		cur_ = 0;
+		total_ = 0;
 	}
 
-	uint64_t traffic_stat::total_bytes() const
+	uint64_t traffic_stat::total() const
 	{
-		return total_bytes_.load();
+		return total_.load();
 	}
 
-	uint64_t traffic_stat::cur_bytes()
+	uint64_t traffic_stat::current()
 	{
-		return cur_bytes_.exchange(0);
+		return cur_.exchange(0);
 	}
 
-	uint64_t traffic_stat::add_bytes(uint64_t bytes)
+	uint64_t traffic_stat::add(uint64_t val)
 	{
-		total_bytes_.fetch_add(bytes);
-		return cur_bytes_.fetch_add(bytes);
+		total_.fetch_add(val);
+		return cur_.fetch_add(val);
 	}
 
 }

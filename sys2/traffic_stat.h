@@ -12,13 +12,13 @@ namespace sys {
 
 		void reset();
 
-		uint64_t total_bytes() const;
-		uint64_t cur_bytes();
+		uint64_t total() const;
+		uint64_t current();
 
-		uint64_t add_bytes(uint64_t bytes);
+		uint64_t add(uint64_t val);
 	private:
-		std::atomic<uint64_t> cur_bytes_;
-		std::atomic<uint64_t> total_bytes_;
+		std::atomic<uint64_t> cur_;
+		std::atomic<uint64_t> total_;
 	};
 
 }

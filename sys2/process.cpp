@@ -62,6 +62,42 @@ namespace sys
 #endif
     }
 
+    bool process::is_running()
+    {
+        #ifdef _WIN32
+        if (pi_.hProcess)
+        {
+            DWORD status = WaitForSingleObject(pi_.hProcess, 0);
+            return status == WAIT_TIMEOUT; 
+        }
+		return false;
+        #elif __linux__
+        if (pid_ <= 0) {
+			printf("is_running: invalid pid=%d\n", pid_);
+            return false;
+        }
+        int status = 0;
+        pid_t result = waitpid(pid_, &status, WNOHANG);
+		//printf("waitpid result=%d, pid_=%d\n", result, pid_);
+        if (result == 0)
+            return true; 
+
+		if (result == pid_) // has exited
+        {
+            pid_ = -1;
+            return false;
+        }
+
+		if (result == -1) // not child process
+        {
+            pid_ = -1;
+            return false;
+        }
+
+        return false;
+        #endif
+    }
+
     int64_t process::run(const std::string& cmd, std::string* output)
     {
 #ifdef _WIN32
@@ -231,9 +267,11 @@ namespace sys
 
     void process::stop_linux()
     {
-        if (pid_ >= 0) 
+        if (pid_ > 0) 
         {
             kill(pid_, SIGTERM);
+            waitpid(pid_, nullptr, 0);
+            pid_ = -1;
         }
     }
 
