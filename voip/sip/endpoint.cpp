@@ -228,7 +228,8 @@ namespace voip
 			auto call = std::make_shared<sip_call>(self, ep.con, lalias,"", voip::call::direction_t::outgoing, nat, port_, rtp);
 			voip_uri vurl;
 			vurl.username = alias;
-			ep.con->remote_address(vurl.host, vurl.port);
+			if (!ep.con->remote_address(vurl.host, vurl.port))
+				return nullptr;
 			call->set_logger(log_);
 			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, std::placeholders::_7));
 			call->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1, std::placeholders::_2));
@@ -257,7 +258,8 @@ namespace voip
 			auto call = std::make_shared<sip_call>(self, gkcon, gkclient->alias(), "", voip::call::direction_t::outgoing, nat, port_, rtp);
 			voip_uri vurl;
 			vurl.username = alias;
-			gkcon->remote_address(vurl.host, vurl.port);
+			if (!gkcon->remote_address(vurl.host, vurl.port))
+				return nullptr;
 			call->set_logger(log_);
 			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, std::placeholders::_7));
 			call->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1, std::placeholders::_2));
