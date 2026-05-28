@@ -57,7 +57,6 @@ public:
 	bool all_users(std::vector<rtc_user>& users);
 	bool get_user(const std::string& uid, rtc_user& user);
 
-
 	sys::mutex_callback<rtc_connection_callback> connection_event;
 	sys::mutex_callback<rtc_user_event_callback> user_event;
 	sys::mutex_callback<rtc_track_event_callback> track_event;

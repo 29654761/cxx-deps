@@ -411,7 +411,7 @@ bool rtc_client::get_user(const std::string& uid, rtc_user& user)
 		return false;
 
 	rtc_user_info_t info = {};
-	int r = rtc_get_user_info(handle_, uid.c_str(), &info);
+	int r = rtc_get_user_info(handle_, uid.c_str(),&info);
 	if (r != RTC_OK)
 		return false;
 
@@ -422,6 +422,8 @@ bool rtc_client::get_user(const std::string& uid, rtc_user& user)
 }
 
 
+
+
 void rtc_client::s_rtc_connection_callback(
 	void* context,
 	int state  // 0=connecting, 1=connected, 2=disconnected, 3=reconnecting
@@ -430,14 +432,13 @@ void rtc_client::s_rtc_connection_callback(
 	rtc_client* p = (rtc_client*)context;
 	p->connection_state_ = state;
 
-	if (state == 1)
-	{
-		p->ios_.post([p]() {
+	p->ios_.post([p,state]() {
+		if (state == 1)
+		{
 			p->set_all_subscribe_result(false);
-		});
-	}
-
-	p->connection_event.invoke(state);
+		}
+		p->connection_event.invoke(state);
+	});
 
 	p->signal_.notify();
 }

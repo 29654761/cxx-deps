@@ -24,7 +24,6 @@
 #include <sys2/signal.h>
 
 
-
 #define UPLOAD_STATUS_DNSERROR		  -4
 #define UPLOAD_STATUS_PACKERFAIL	  -5
 #define UPLOAD_STATUS_NOMACFOUND	  -6
@@ -152,6 +151,7 @@ private:
 private:
 	std::mutex mutex_;
 	bool active_ = false;
+	bool contented_ = false;
 	void* module_ = nullptr;
 	task_service_s service_;
 	any_client_event* event_ = nullptr;

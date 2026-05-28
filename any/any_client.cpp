@@ -23,7 +23,7 @@ bool any_client::init(const any_options_t& opts)
 		return false;
 	}
 	active_ = true;
-
+	contented_ = false;
 	options_ = opts;
 
 
@@ -139,6 +139,9 @@ void any_client::close()
 	}
 	
 	init_task_service_s(&service_);
+
+
+	contented_ = false;
 }
 
 bool any_client::load_module()
@@ -321,6 +324,7 @@ int any_client::onservice_callback(int opt, int chr, int sub, int wparam, int lp
 			{
 				if (lparam == -1) // Disconnect
 				{
+					contented_ = false;
 					if (event_) {
 						event_->on_disconnected();
 					}
@@ -334,6 +338,7 @@ int any_client::onservice_callback(int opt, int chr, int sub, int wparam, int lp
 					if (event_) {
 						event_->on_connected();
 					}
+					contented_ = true;
 				}
 				else if (lparam == 2) // Connect failed
 				{
@@ -614,7 +619,7 @@ bool any_client::set_filter(int userId, int mask)
 bool any_client::input_frame(const any_frame_t& frame)
 {
 	std::lock_guard<std::mutex> lk(mutex_);
-	if (!active_)
+	if (!contented_||!active_)
 	{
 		return false;
 	}
@@ -627,7 +632,6 @@ bool any_client::input_frame(const any_frame_t& frame)
 	av_frame_s f;
 	reset_av_frame_s(&f);
 
-	static uint32_t idx = 0;
 	if (frame.mt == any_media_type_video)
 	{
 		f.medtype = MediaTypeVideo;

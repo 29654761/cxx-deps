@@ -84,12 +84,12 @@ extern "C" {
 		int bits;
 	}any_pcm_t;
 
-	typedef void(*any_user_join_event_t)(void* ctx, int room_id, int peer_id);
-	typedef void(*any_user_leave_event_t)(void* ctx, int room_id, int peer_id);
-	typedef void(*any_connected_event_t)(void* ctx);
-	typedef void(*any_disconnected_event_t)(void* ctx);
-	typedef void(*any_frame_event_t)(void* ctx, int room_id, int peer_id, const any_frame_t* frame);
-	typedef void(*any_pcm_event_t)(void* ctx, int room_id, int peer_id, const any_pcm_t* pcm);
+	typedef void(__cdecl *any_user_join_event_t)(void* ctx, int room_id, int peer_id);
+	typedef void(__cdecl *any_user_leave_event_t)(void* ctx, int room_id, int peer_id);
+	typedef void(__cdecl *any_connected_event_t)(void* ctx);
+	typedef void(__cdecl *any_disconnected_event_t)(void* ctx);
+	typedef void(__cdecl *any_frame_event_t)(void* ctx, int room_id, int peer_id, const any_frame_t* frame);
+	typedef void(__cdecl *any_pcm_event_t)(void* ctx, int room_id, int peer_id, const any_pcm_t* pcm);
 
 #ifdef __cplusplus
 }
