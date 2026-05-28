@@ -5,9 +5,10 @@ namespace sys
 
 	fs::path fs_relative(fs::path p, fs::path base)
 	{
+		std::error_code ec;
 		// 1. convert p and base to absolute paths
-		p = fs::absolute(p);
-		base = fs::absolute(base);
+		p = fs::absolute(p,ec);
+		base = fs::absolute(base,ec);
 
 		// 2. find first mismatch and shared root path
 		auto mismatched = std::mismatch(p.begin(), p.end(), base.begin(), base.end());
@@ -36,5 +37,28 @@ namespace sys
 		return ret;
 	}
 
+
+
+	void remove_empty_directories(const fs::path& path, std::error_code& ec, bool remove_root)
+	{
+		if (!fs::exists(path, ec) || !fs::is_directory(path, ec))
+			return;
+
+		for (const auto& entry : fs::directory_iterator(path))
+		{
+			if (fs::is_directory(entry.path(), ec))
+			{
+				remove_empty_directories(entry.path(), ec, true);
+			}
+		}
+
+		if (remove_root)
+		{
+			if (fs::is_empty(path, ec))
+			{
+				fs::remove(path, ec);
+			}
+		}
+	}
 }
 

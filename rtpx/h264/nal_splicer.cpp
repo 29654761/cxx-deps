@@ -1,5 +1,4 @@
 #include "nal_splicer.h"
-#include "h264.h"
 #include "bit_reader.h"
 #include <algorithm>
 
@@ -27,6 +26,7 @@ void nal_splicer::insert_nal(const uint8_t* nal, size_t size, int64_t pts, int64
 	new_item.pts = pts;
 	new_item.dts = dts;
 	new_item.first_mbs = 0;
+	new_item.nt = t;
 	new_item.nal.reserve(4+size);
 	new_item.nal.insert(new_item.nal.end(),3,0);
 	new_item.nal.push_back(1);
@@ -39,7 +39,6 @@ void nal_splicer::insert_nal(const uint8_t* nal, size_t size, int64_t pts, int64
 			frames.push_back(frame);
 		}
 		nals_.clear();
-
 		frames.push_back(new_item);
 	}
 	else
@@ -78,8 +77,11 @@ nal_splicer::nal_item_t nal_splicer::combin()
 		{
 			frame.pts = itr->pts;
 			frame.dts = itr->dts;
+			frame.nt = itr->nt;
 		}
 		frame.nal.insert(frame.nal.end(), itr->nal.begin(),itr->nal.end());
 	}
 	return frame;
 }
+
+

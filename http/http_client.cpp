@@ -84,13 +84,25 @@ bool http_client::config_curl(const http_request& request)
 	}
 	curl_easy_reset(curl_);
 
-	if (sys::string_util::icasecompare(request.method(), "POST"))
+	curl_easy_setopt(curl_, CURLOPT_CUSTOMREQUEST, request.method().c_str());
+	if (!request.body.empty())
 	{
-		curl_easy_setopt(curl_, CURLOPT_POST, 1L);
-
 		curl_easy_setopt(curl_, CURLOPT_POSTFIELDS, request.body.c_str());
 		curl_easy_setopt(curl_, CURLOPT_POSTFIELDSIZE, request.body.size());
 	}
+	//if (sys::string_util::icasecompare(request.method(), "POST"))
+	//{
+	//	curl_easy_setopt(curl_, CURLOPT_POST, 1L);
+
+	//	curl_easy_setopt(curl_, CURLOPT_POSTFIELDS, request.body.c_str());
+	//	curl_easy_setopt(curl_, CURLOPT_POSTFIELDSIZE, request.body.size());
+	//}
+	//else if (sys::string_util::icasecompare(request.method(), "PUT"))
+	//{
+	//	curl_easy_setopt(curl_, CURLOPT_PUT, 1L);
+	//	curl_easy_setopt(curl_, CURLOPT_POSTFIELDS, request.body.c_str());
+	//	curl_easy_setopt(curl_, CURLOPT_POSTFIELDSIZE, request.body.size());
+	//}
 	curl_easy_setopt(curl_, CURLOPT_NOSIGNAL, 1L);
 	curl_easy_setopt(curl_, CURLOPT_TIMEOUT, 10L);
 	curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 5L);

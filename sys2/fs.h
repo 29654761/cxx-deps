@@ -15,5 +15,7 @@ namespace fs = std::filesystem;
 namespace sys
 {
 	fs::path fs_relative(fs::path p, fs::path base);
+
+	void remove_empty_directories(const fs::path& path, std::error_code& ec, bool remove_root);
 }
 

@@ -2,6 +2,7 @@
 #include <vector>
 #include <functional>
 #include <cstdint>
+#include "h264.h"
 
 class nal_splicer
 {
@@ -13,6 +14,7 @@ public:
 		uint32_t first_mbs = 0;
 		int64_t pts = 0;
 		int64_t dts = 0;
+		h264::nal_type_t nt = h264::nal_type_t::reserved;
 	};
 
 	nal_splicer();
