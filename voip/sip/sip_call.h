@@ -28,9 +28,11 @@ namespace voip
 			virtual bool request_presentation_role();
 			virtual void release_presentation_role();
 			virtual bool has_presentation_role();
+			virtual bool remote_addr(std::string& ip, int& port);
 
 			std::string con_id()const;
 
+			void on_re_invite(const sip_message& msg);
 			void on_trying(const sip_message& msg);
 			void on_ringing(const sip_message& msg);
 			void on_ack(const sip_message& msg);
@@ -47,10 +49,18 @@ namespace voip
 
 			void set_video_mid(const std::string& mid) { video_mid_ = mid; }
 			void set_audio_mid(const std::string& mid) { audio_mid_ = mid; }
+
+
+			sip_connection_ptr get_con()const;
+
+			
 		private:
 			bool add_audio_channel_g711();
+			bool add_audio_channel_g711(uint32_t ssrc, int rtp_port, int rtcp_port);
 			bool add_video_channel_h264();
+			bool add_video_channel_h264(uint32_t ssrc, int rtp_port, int rtcp_port);
 			bool add_video_channel_h265();
+			bool add_video_channel_h265(uint32_t ssrc, int rtp_port, int rtcp_port);
 			bool add_extend_video_channel_h264();
 		private:
 			bool invite();
@@ -67,7 +77,6 @@ namespace voip
 			void handle_sipcon_close(call_ptr call, sip_connection_ptr con);
 
 			void set_con(sip_connection_ptr con);
-			sip_connection_ptr get_con()const;
 			void clear_con();
 
 			uint16_t make_bfcp_transaction_id();

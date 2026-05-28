@@ -31,6 +31,16 @@ namespace hypertext
 		return value;
 	}
 
+	bool message::is_status_ok()const
+	{
+		std::string code=status();
+		if (code.size() < 3)
+			return false;
+
+		// 2xx 都视为成功
+		return code[0] == '2';
+	}
+
 	void message::set_content_type(const std::string& content_type)
 	{
 		headers.set("Content-Type", content_type);

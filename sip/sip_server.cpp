@@ -104,6 +104,16 @@ void sip_server::stop()
 
 void sip_server::handle_message(sip_server_ptr svr, sip_connection_ptr con, const sip_message& msg)
 {
+	if (check_remote_endpoint_handler_)
+	{
+		std::string ip;
+		int port = 0;
+		con->remote_address(ip, port);
+		if (!check_remote_endpoint_handler_(svr, ip, port))
+		{
+			return;
+		}
+	}
 	if (message_handler_)
 	{
 		message_handler_(svr, con, msg);
@@ -119,6 +129,20 @@ void sip_server::handle_accept(sip_server_ptr svr, const std::error_code& ec, as
 {
 	if (!ec)
 	{
+		if (check_remote_endpoint_handler_)
+		{
+			std::error_code ec;
+			auto ep=newsocket.remote_endpoint(ec);
+			std::string ip = ep.address().to_string(ec);
+			int port = ep.port();
+			if (!check_remote_endpoint_handler_(svr, ip, port))
+			{
+				auto self2 = shared_from_this();
+				tcp_socket_->async_accept(std::bind(&sip_server::handle_accept, this, self2, std::placeholders::_1, std::placeholders::_2));
+				return;
+			}
+		}
+
 		auto sktptr = std::make_shared<asio::ip::tcp::socket>(std::move(newsocket));
 		auto con = std::make_shared<sip_tcp_connection>(ioc_, sktptr);
 		add_connection(con);
@@ -140,13 +164,26 @@ void sip_server::handle_read(sip_server_ptr svr, udp_socket_ptr skt,const std::e
 		return;
 
 	auto self = shared_from_this();
+
+	std::string ip = udp_endpoint_.address().to_string();
+	int port = udp_endpoint_.port();
+
+	if (check_remote_endpoint_handler_)
+	{
+		if (!check_remote_endpoint_handler_(svr, ip, port))
+		{
+			udp_socket_->async_receive_from(asio::buffer(udp_recv_buffer_, udp_recv_buffer_.size()), udp_endpoint_,
+				std::bind(&sip_server::handle_read, this, self, udp_socket_, std::placeholders::_1, std::placeholders::_2));
+
+			return;
+		}
+	}
+
+
 	sip_message msg;
 	int64_t r = msg.parse(udp_recv_buffer_.data(), bytes);
 	if (r > 0)
 	{
-
-		std::string ip = udp_endpoint_.address().to_string();
-		int port = udp_endpoint_.port();
 		std::string id = sip_connection::make_id("udp", ip, port);
 
 		sip_connection_ptr con;

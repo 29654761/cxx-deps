@@ -43,6 +43,19 @@ namespace voip
 			ms->add_local_audio_track(codec_type_pcma, 8, 8000);
 			return true;
 		}
+		bool sip_call::add_audio_channel_g711(uint32_t ssrc,int rtp_port,int rtcp_port)
+		{
+			std::string mid = audio_mid_;
+			if (mid.empty())
+				mid = "audio";
+			auto ms = rtp_.create_media_stream(mid, media_type_audio, ssrc, nat_address_.c_str(), rtp_port,rtcp_port,true);
+			if (!ms) {
+				return false;
+			}
+			ms->use_rtp_address(true);
+			ms->add_local_audio_track(codec_type_pcma, 8, 8000);
+			return true;
+		}
 
 		bool sip_call::add_video_channel_h264()
 		{
@@ -81,6 +94,42 @@ namespace voip
 			return true;
 		}
 
+		bool sip_call::add_video_channel_h264(uint32_t ssrc, int rtp_port, int rtcp_port)
+		{
+			std::string mid = video_mid_;
+			if (mid.empty())
+				mid = "video";
+			auto ms = rtp_.create_media_stream(mid, media_type_video, ssrc, nat_address_.c_str(), rtp_port, rtcp_port, true);
+			if (!ms) {
+				return false;
+			}
+			ms->use_rtp_address(true);
+			{
+				ms->add_local_video_track(codec_type_h264, 96, 90000, true);
+
+				litertp::fmtp fmtp;
+				fmtp.set_packetization_mode(1);
+				fmtp.set_profile_level_id(0x420028);
+				fmtp.set_mbps(245760);
+				fmtp.set_mfs(8192);
+				fmtp.set_mbr(max_bitrate_);
+				fmtp.set_level_asymmetry_allowed(1);
+				ms->set_local_fmtp(96, fmtp);
+			}
+			{
+				ms->add_local_video_track(codec_type_h264, 98, 90000, true);
+				litertp::fmtp fmtp;
+				fmtp.set_packetization_mode(1);
+				fmtp.set_profile_level_id(0x640028);
+				fmtp.set_mbps(245760);
+				fmtp.set_mfs(8192);
+				fmtp.set_mbr(max_bitrate_);
+				fmtp.set_level_asymmetry_allowed(1);
+				ms->set_local_fmtp(98, fmtp);
+			}
+			return true;
+		}
+
 		bool sip_call::add_video_channel_h265()
 		{
 			std::string mid = video_mid_;
@@ -88,6 +137,29 @@ namespace voip
 				mid = "video";
 			uint32_t ssrc = sys::util::random_number<uint32_t>(100000000, 999999999);
 			auto ms = rtp_.create_media_stream(mid, media_type_video, ssrc, nat_address_.c_str(), rtp_ports_, false);
+			if (!ms) {
+				return false;
+			}
+			ms->use_rtp_address(true);
+			ms->add_local_video_track(codec_type_h265, 100, 90000, true);
+			litertp::fmtp fmtp;
+			fmtp.set_profile_id(1);
+			fmtp.set_level_id(0x0093);
+			fmtp.set_mbps(245760);
+			fmtp.set_mfs(8192);
+			fmtp.set_mbr(1920);
+			fmtp.set_level_asymmetry_allowed(1);
+			ms->set_local_fmtp(100, fmtp);
+
+			return true;
+		}
+
+		bool sip_call::add_video_channel_h265(uint32_t ssrc, int rtp_port, int rtcp_port)
+		{
+			std::string mid = video_mid_;
+			if (mid.empty())
+				mid = "video";
+			auto ms = rtp_.create_media_stream(mid, media_type_video, ssrc, nat_address_.c_str(), rtp_port,rtcp_port, true);
 			if (!ms) {
 				return false;
 			}
@@ -365,12 +437,132 @@ namespace voip
 			return false;
 		}
 
+		bool sip_call::remote_addr(std::string& ip, int& port)
+		{
+			auto con = this->get_con();
+			if (!con)
+				return false;
+			return con->remote_address(ip, port);
+		}
+
 		std::string sip_call::con_id()const
 		{
 			auto con = get_con();
 			if (!con)
 				return "";
 			return con->id();
+		}
+
+		void sip_call::on_re_invite(const sip_message& msg)
+		{
+			//auto con = get_con();
+			//if (con)
+			//{
+			//	sip_message rsp = ep_->create_response(msg, nullptr, false);
+			//	rsp.set_status("488");
+			//	rsp.set_msg("Not Accept Here");
+			//	con->send_message(rsp);
+			//}
+
+			litertp::sdp sdp;
+			if (!sdp.parse(msg.body))
+			{
+				if (log_)
+				{
+					log_->error("Parse re-INVITE SDP failed")->flush();
+				}
+				return;
+			}
+
+			int audio_rtp_port = 0, audio_rtcp_port = 0, video_rtp_port = 0, video_rtcp_port = 0;
+			uint32_t audio_ssrc = 0,video_ssrc=0;
+			auto mss=rtp_.get_media_streams();
+			for(auto itr=mss.begin();itr!=mss.end();itr++)
+			{
+				if((*itr)->media_type()==media_type_audio)
+				{
+					audio_rtp_port=(*itr)->transport_rtp_->port_;
+					audio_rtcp_port = (*itr)->transport_rtcp_->port_;
+					audio_ssrc=(*itr)->get_local_ssrc();
+				}
+				else if((*itr)->media_type()==media_type_video)
+				{
+					video_rtp_port = (*itr)->transport_rtp_->port_;
+					video_rtcp_port = (*itr)->transport_rtcp_->port_;
+					video_ssrc = (*itr)->get_local_ssrc();
+				}
+
+				if (on_close_media)
+				{
+					on_close_media(shared_from_this(), (*itr)->media_type(), (*itr)->mid());
+				}
+			}
+			rtp_.clear_media_streams();
+			for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
+			{
+				std::string mid = itr->mid;
+				if (itr->media_type == media_type_audio)
+				{
+					add_audio_channel_g711(audio_ssrc,audio_rtp_port,audio_rtcp_port);
+				}
+				else if (itr->media_type == media_type_video)
+				{
+					add_video_channel_h264(video_ssrc,video_rtp_port,video_rtcp_port);
+				}
+			}
+
+			if (!rtp_.set_remote_sdp(sdp, sdp_type_offer))
+			{
+				if (log_)
+				{
+					log_->error("re-INVITE SDP set_remote_sdp failed")->flush();
+				}
+				return;
+			}
+
+			litertp::sdp answer=rtp_.create_answer();
+			answer.bundle = false;
+			answer.o = "srtc 2371158016 0 IN IP4 " + nat_address_;
+			answer.b.push_back("CT:" + std::to_string(max_bitrate_));
+			for (auto itr = answer.medias.begin(); itr != answer.medias.end(); itr++)
+			{
+				itr->rtcp_rsize = false;
+				if (itr->media_type == media_type_video)
+				{
+					itr->b.push_back("AS:" + std::to_string(max_bitrate_));
+					//itr->b.push_back("TIAS:" + std::to_string((uint32_t)(max_bitrate_ * 1000)));
+				}
+				else if (itr->media_type == media_type_audio)
+				{
+					litertp::sdp_format fmt;
+					fmt.pt = 101;
+					fmt.codec = codec_type_telephone_event;
+					fmt.codec_text = litertp::sdp_format::convert_codec_text(fmt.codec);
+					fmt.frequency = 8000;
+					itr->rtpmap.insert(std::make_pair(fmt.pt, fmt));
+				}
+				itr->setup = stp_setup_none;
+				itr->protos.erase("UDP");
+
+				if (on_open_media)
+				{
+					auto self = shared_from_this();
+					on_open_media(self, itr->media_type, itr->mid);
+				}
+			}
+
+			auto con = get_con();
+			if (con)
+			{
+				auto rsp = ep_->create_response(msg, nullptr, false);
+				for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+				{
+					rsp.headers.add("Record-Route", *itr);
+				}
+				rsp.set_content_type("application/sdp");
+				rsp.set_body(answer.to_string());
+				con->send_message(rsp);
+			}
 		}
 
 		void sip_call::on_trying(const sip_message& msg)
@@ -399,9 +591,12 @@ namespace voip
 
 		void sip_call::on_ack(const sip_message& msg)
 		{
-			got_ack = true;
-			auto self = shared_from_this();
-			invoke_connected();
+			if (!got_ack)
+			{
+				got_ack = true;
+				auto self = shared_from_this();
+				invoke_connected();
+			}
 		}
 
 		void sip_call::on_info(const sip_message& msg)
@@ -432,7 +627,6 @@ namespace voip
 					rsp.headers.add("Record-Route", *itr);
 				}
 				con->send_message(rsp);
-				auto self = shared_from_this();
 			}
 			if (on_hangup)
 			{
@@ -601,6 +795,15 @@ namespace voip
 				{
 					itr->b.push_back("AS:" + std::to_string(max_bitrate_));
 					//itr->b.push_back("TIAS:" + std::to_string((uint32_t)(max_bitrate_ * 1000)));
+				}
+				else if(itr->media_type== media_type_audio)
+				{
+					litertp::sdp_format fmt;
+					fmt.pt = 101;
+					fmt.codec = codec_type_telephone_event;
+					fmt.codec_text = litertp::sdp_format::convert_codec_text(fmt.codec);
+					fmt.frequency = 8000;
+					itr->rtpmap.insert(std::make_pair(fmt.pt, fmt));
 				}
 				itr->setup = stp_setup_none;
 				itr->protos.erase("UDP");

@@ -3,7 +3,7 @@
 #include "sip_call.h"
 #include "gk_client.h"
 #include <sip/sip_server.h>
-
+#include "../blacklist.h"
 
 namespace voip
 {
@@ -73,6 +73,10 @@ namespace voip
 			call_ptr make_call(const std::string& url,bool tcp=true);
 			call_ptr make_reg_server_call(const std::string& alias);
 			call_ptr make_reg_client_call(const std::string& alias);
+
+			inline void set_blacklist(blacklist_ptr blacklist) {
+				blacklist_ = blacklist;
+			}
 		public:
 
 			bool set_reg_endpoint(const reg_endpoint& ep);
@@ -106,6 +110,8 @@ namespace voip
 			void handle_timer(endpoint_ptr ep, const std::error_code& ec);
 			void handle_close(endpoint_ptr ep, sip_server_ptr svr, sip_connection_ptr con);
 			void handle_message(endpoint_ptr ep, sip_server_ptr svr, sip_connection_ptr con, const sip_message& message);
+			bool handle_check_remote_endpoint(endpoint_ptr ep, sip_server_ptr svr, const std::string& remote_ip, int remote_port);
+			
 			void handle_gkclient_status(endpoint_ptr ep,gk_client_ptr gkc, bool status);
 			void handle_destroy_call(endpoint_ptr self, call_ptr call, call::reason_code_t reason);
 			void handle_incoming_call(endpoint_ptr self, call_ptr call, const std::string& local_alias, const std::string& remote_alias,const std::string& called_alias,
@@ -147,6 +153,8 @@ namespace voip
 			int max_bitrate_ = 2048;
 
 			std::shared_ptr<gk_client> gkclient_;
+
+			blacklist_ptr blacklist_;
 
 			on_reg_endpoint_t on_reg_endpoint;
 			on_reg_endpoint_failed_t on_reg_endpoint_failed;

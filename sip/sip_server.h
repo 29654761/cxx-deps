@@ -22,6 +22,7 @@ public:
 
 	typedef std::function<void(sip_server_ptr, sip_connection_ptr, const sip_message&)> message_handler;
 	typedef std::function<void(sip_server_ptr, sip_connection_ptr)> close_con_handler;
+	typedef std::function<bool(sip_server_ptr, const std::string&,int)> check_remote_endpoint_handler;
 
 	sip_server(asio::io_context& ioc);
 	virtual ~sip_server();
@@ -29,6 +30,7 @@ public:
 	void set_logger(spdlogger_ptr log) { log_ = log; }
 	void set_message_handler(message_handler handler) { message_handler_ = handler; }
 	void set_close_con_handler(close_con_handler handler) { close_con_handler_ = handler; }
+	void set_check_remote_endpoint_handler(check_remote_endpoint_handler handler) { check_remote_endpoint_handler_ = handler; }
 
 	bool start(const std::string& addr, int port);
 	void stop();
@@ -62,5 +64,6 @@ protected:
 
 	message_handler message_handler_;
 	close_con_handler close_con_handler_;
+	check_remote_endpoint_handler check_remote_endpoint_handler_;
 };
 

@@ -78,6 +78,7 @@ namespace voip
 			virtual bool request_presentation_role();
 			virtual void release_presentation_role();
 			virtual bool has_presentation_role();
+			virtual bool remote_addr(std::string& ip, int& port);
 
 			void setup(const voip_uri& url,const std::string& call_id="", const std::string& conf_id="",int call_ref=-1);
 			void facility(const voip_uri& url, const PGloballyUniqueID& call_id, const PGloballyUniqueID& conf_id);

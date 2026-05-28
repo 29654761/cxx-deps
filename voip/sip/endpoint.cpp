@@ -105,6 +105,7 @@ namespace voip
 			server_ = std::make_shared<sip_server>(ioc_);
 			server_->set_message_handler(std::bind(&endpoint::handle_message, this, self,std::placeholders::_1,std::placeholders::_2, std::placeholders::_3));
 			server_->set_close_con_handler(std::bind(&endpoint::handle_close, this, self, std::placeholders::_1, std::placeholders::_2));
+			server_->set_check_remote_endpoint_handler(std::bind(&endpoint::handle_check_remote_endpoint, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 			server_->set_logger(log_);
 			if (!server_->start(addr,port))
 			{
@@ -557,6 +558,14 @@ namespace voip
 			}
 		}
 
+		bool endpoint::handle_check_remote_endpoint(endpoint_ptr ep, sip_server_ptr svr, const std::string& remote_ip, int remote_port)
+		{
+			if (!blacklist_)
+				return true;
+
+			return blacklist_->can_pass(remote_ip);
+		}
+
 		void endpoint::handle_message(endpoint_ptr ep, sip_server_ptr svr, sip_connection_ptr con, const sip_message& message)
 		{
 			if (message.match_method("REGISTER"))
@@ -712,14 +721,27 @@ namespace voip
 
 		void endpoint::on_invite(sip_connection_ptr con, const sip_message& message)
 		{
+			if (blacklist_)
+			{
+				std::string remote_ip;
+				int remote_port = 0;
+				con->remote_address(remote_ip,remote_port);
+				if (!blacklist_->can_pass(remote_ip))
+				{
+					if (log_)
+					{
+						log_->warn("Received SIP Invite rejected by blacklist. IP={}", remote_ip)->flush();
+					}
+					return;
+				}
+			}
+
 			std::string call_id = message.call_id();
 			auto call=get_call(call_id);
 			if (call)
 			{
-				sip_message rsp = create_response(message, nullptr,false);
-				rsp.set_status("488");
-				rsp.set_msg("Not Accept Here");
-				con->send_message(rsp);
+				//re-INVITE
+				call->on_re_invite(message);
 				return;
 			}
 

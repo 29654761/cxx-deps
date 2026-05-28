@@ -48,6 +48,7 @@ namespace hypertext
 
 		const std::string& status()const { return filed2; }
 		void set_status(const std::string& status) { filed2 = status; }
+		bool is_status_ok()const;
 
 		const std::string& msg()const { return filed3; }
 		void set_msg(const std::string& msg) { filed3 = msg; }

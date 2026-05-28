@@ -370,6 +370,20 @@ namespace voip
 			return h239_token_owned_;
 		}
 
+		bool h323_call::remote_addr(std::string& ip, int& port)
+		{
+			std::lock_guard<std::recursive_mutex> lk(mutex_);
+			if (!h225_skt_)
+				return false;
+			std::error_code ec;
+			auto ep=this->h225_skt_->remote_endpoint(ec);
+			if (ec)
+				return false;
+			
+			ip=ep.address().to_string();
+			port = ep.port();
+			return true;
+		}
 
 
 		void h323_call::setup(const voip_uri& url, const std::string& call_id, const std::string& conf_id, int call_ref)

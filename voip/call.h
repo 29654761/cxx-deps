@@ -76,6 +76,7 @@ namespace voip
 		virtual bool request_presentation_role() = 0;
 		virtual void release_presentation_role() = 0;
 		virtual bool has_presentation_role() = 0;
+		virtual bool remote_addr(std::string& ip, int& port) = 0;
 
 		void set_on_remote_ringing(on_ringing_t handler) { on_remote_ringing = handler; }
 		void set_on_connected(on_connected_t handler) { on_connected = handler; }
@@ -94,6 +95,7 @@ namespace voip
 		void set_max_bitrate(int v) { max_bitrate_ = v; }
 
 		call_type_t call_type()const { return call_type_; }
+
 	protected:
 		void set_on_destroy(on_destroy_t handler) { on_destroy = handler; }
 		void set_on_incoming_call(on_incoming_call_t handler) { on_incoming_call = handler; }
