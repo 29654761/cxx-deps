@@ -66,6 +66,7 @@ namespace ffmpeg
 				AVCodecParameters* pms = *itr;
 				avcodec_parameters_free(&pms);
 			}
+			streams_par_.clear();
 		}
 
 		AVStream* writer::get_stream(unsigned int idx)const

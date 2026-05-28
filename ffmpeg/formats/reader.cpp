@@ -56,7 +56,12 @@ namespace ffmpeg
 				return false;
 			}
 
-			
+			if (probesize_ > 0) {
+				format_->probesize = probesize_;
+			}
+			if (max_analyze_duration_ > 0) {
+				format_->max_analyze_duration = max_analyze_duration_;
+			}
 
 			r=avformat_find_stream_info(format_, nullptr);
 			if (r < 0)

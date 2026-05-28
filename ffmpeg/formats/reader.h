@@ -29,6 +29,9 @@ namespace ffmpeg
 			bool is_rtsp_over_tcp()const { return rtsp_over_tcp_; }
 			void set_rtsp_over_tcp(bool tcp) { rtsp_over_tcp_ = tcp; }
 
+			void set_probesize(int64_t probesize){ probesize_ = probesize;}
+			void set_max_analyze_duration(int64_t max_analyze_duration) { max_analyze_duration_ = max_analyze_duration; }
+
 			virtual bool open(const std::string& url,const std::string& fmt="",const AVDictionary* options=nullptr);
 			/// <summary>
 			/// fmt: v4l2,dshow
@@ -68,6 +71,9 @@ namespace ffmpeg
 			AVFormatContext* format_ = nullptr;
 			std::atomic<uint64_t> bytes_rate_;
 			bool rtsp_over_tcp_ = false;
+
+			int64_t probesize_=0;
+			int64_t max_analyze_duration_ = 0;
 		};
 
 
