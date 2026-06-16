@@ -618,6 +618,7 @@ namespace voip
 				}
 			}
 
+
 			int expires = 0;
 			bool has_expires = message.effective_expires(expires);
 			if (has_expires&&expires == 0) //offline
@@ -710,6 +711,8 @@ namespace voip
 			}
 			expires = 30;
 			rsp.set_expires(expires);
+			addr.add("expires",std::to_string(expires));
+			rsp.set_contact(addr);
 			con->send_message(rsp);
 		}
 

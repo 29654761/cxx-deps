@@ -8,6 +8,13 @@
 extern "C" {
 #endif
 
+#if _WIN32
+#define CALL __cdecl
+#else
+#define CALL
+#endif
+
+
 	typedef enum any_media_type_t
 	{
 		any_media_type_data = 0,
@@ -84,12 +91,12 @@ extern "C" {
 		int bits;
 	}any_pcm_t;
 
-	typedef void(__cdecl *any_user_join_event_t)(void* ctx, int room_id, int peer_id);
-	typedef void(__cdecl *any_user_leave_event_t)(void* ctx, int room_id, int peer_id);
-	typedef void(__cdecl *any_connected_event_t)(void* ctx);
-	typedef void(__cdecl *any_disconnected_event_t)(void* ctx);
-	typedef void(__cdecl *any_frame_event_t)(void* ctx, int room_id, int peer_id, const any_frame_t* frame);
-	typedef void(__cdecl *any_pcm_event_t)(void* ctx, int room_id, int peer_id, const any_pcm_t* pcm);
+	typedef void(CALL *any_user_join_event_t)(void* ctx, int room_id, int peer_id);
+	typedef void(CALL *any_user_leave_event_t)(void* ctx, int room_id, int peer_id);
+	typedef void(CALL *any_connected_event_t)(void* ctx);
+	typedef void(CALL *any_disconnected_event_t)(void* ctx);
+	typedef void(CALL *any_frame_event_t)(void* ctx, int room_id, int peer_id, const any_frame_t* frame);
+	typedef void(CALL *any_pcm_event_t)(void* ctx, int room_id, int peer_id, const any_pcm_t* pcm);
 
 #ifdef __cplusplus
 }

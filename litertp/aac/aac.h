@@ -43,5 +43,5 @@ public:
 class aac_helper
 {
 public:
-	static bool add_adts_header(uint8_t* frame, int frame_size, int sampleRate, int channels,std::vector<uint8_t>& adts_frame);
-}
+	static bool add_adts_header(uint8_t* frame, int frame_size, int sampleRate, int channels, std::vector<uint8_t>& adts_frame);
+};

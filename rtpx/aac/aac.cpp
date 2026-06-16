@@ -6,6 +6,7 @@
  */
 
 #include "aac.h"
+#include <string.h>
 
 static int get_aac_freq_index(int sampleRate)
 {

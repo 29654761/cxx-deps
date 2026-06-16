@@ -28,6 +28,11 @@ bool rtc_client::open()
 	rtc_set_user_event_callback(handle_, s_rtc_user_event_callback, this);
 	rtc_set_track_event_callback(handle_, s_rtc_track_event_callback, this);
 	rtc_set_track_sample_callback(handle_, s_rtc_track_sample_callback, this);
+	rtc_set_layer_switched_callback(handle_, s_rtc_layer_switched_callback, this);
+	rtc_set_connection_quality_callback(handle_, s_rtc_connection_quality_callback, this);
+	rtc_set_active_speakers_callback(handle_, s_rtc_active_speakers_callback, this);
+	rtc_set_custom_msg_callback(handle_, s_rtc_custom_msg_callback, this);
+	rtc_set_keyframe_request_callback(handle_, s_rtc_keyframe_request_callback, this);
 
 	timer_.expires_after(std::chrono::seconds(1));
 	timer_.async_wait(std::bind(&rtc_client::handle_timer, shared_from_this(), std::placeholders::_1));
@@ -421,7 +426,44 @@ bool rtc_client::get_user(const std::string& uid, rtc_user& user)
 	return true;
 }
 
+bool rtc_client::request_key_frame(const std::string& uid, const std::string& track_id)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!handle_)
+		return false;
 
+	int r = rtc_request_key_frame(handle_,uid.c_str(),track_id.c_str());
+	if (r != RTC_OK)
+		return false;
+
+	return true;
+}
+
+bool rtc_client::switch_layer(const std::string& pub_uid, const std::string& track_id, const std::string& target_track_id)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!handle_)
+		return false;
+
+	int r = rtc_switch_layer(handle_, pub_uid.c_str(),track_id.c_str(),target_track_id.c_str());
+	if (r != RTC_OK)
+		return false;
+
+	return true;
+}
+
+bool rtc_client::get_connection_quality(rtc_connection_quality_t* out)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!handle_)
+		return false;
+
+	int r = rtc_get_connection_quality(handle_,out);
+	if (r != RTC_OK)
+		return false;
+
+	return true;
+}
 
 
 void rtc_client::s_rtc_connection_callback(
@@ -490,7 +532,37 @@ void rtc_client::s_rtc_track_sample_callback(
 )
 {
 	rtc_client* p = (rtc_client*)context;
-	p->track_sample.invoke(user_info, track_info, data, len, timestamp, duration);
+	p->track_sample_event.invoke(user_info, track_info, data, len, timestamp, duration);
+}
+
+void rtc_client::s_rtc_layer_switched_callback(void* context, const rtc_layer_switched_t* data)
+{
+	rtc_client* p = (rtc_client*)context;
+	p->layer_switched_event.invoke(data);
+}
+
+void rtc_client::s_rtc_keyframe_request_callback(void* context, const char* track_id)
+{
+	rtc_client* p = (rtc_client*)context;
+	p->keyframe_request_event.invoke(track_id);
+}
+
+void rtc_client::s_rtc_custom_msg_callback(void* context, const rtc_custom_msg_t* msg)
+{
+	rtc_client* p = (rtc_client*)context;
+	p->custom_msg_event.invoke(msg);
+}
+
+void rtc_client::s_rtc_active_speakers_callback(void* context, int64_t ts, const rtc_active_speaker_t* speakers, int speakers_count)
+{
+	rtc_client* p = (rtc_client*)context;
+	p->active_speakers_event.invoke(ts, speakers, speakers_count);
+}
+
+void rtc_client::s_rtc_connection_quality_callback(void* context, const rtc_connection_quality_t* q)
+{
+	rtc_client* p = (rtc_client*)context;
+	p->connection_quality_event.invoke(q);
 }
 
 void rtc_client::handle_timer(const asio::error_code& ec)

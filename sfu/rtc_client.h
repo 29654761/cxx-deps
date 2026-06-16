@@ -57,10 +57,19 @@ public:
 	bool all_users(std::vector<rtc_user>& users);
 	bool get_user(const std::string& uid, rtc_user& user);
 
+	bool request_key_frame(const std::string& uid, const std::string& track_id);
+	bool switch_layer(const std::string& pub_uid, const std::string& track_id, const std::string& target_track_id);
+	bool get_connection_quality(rtc_connection_quality_t* out);
+
 	sys::mutex_callback<rtc_connection_callback> connection_event;
 	sys::mutex_callback<rtc_user_event_callback> user_event;
 	sys::mutex_callback<rtc_track_event_callback> track_event;
-	sys::mutex_callback<rtc_track_sample_callback> track_sample;
+	sys::mutex_callback<rtc_track_sample_callback> track_sample_event;
+	sys::mutex_callback<rtc_keyframe_request_callback> keyframe_request_event;
+	sys::mutex_callback<rtc_custom_msg_callback> custom_msg_event;
+	sys::mutex_callback<rtc_active_speakers_callback> active_speakers_event;
+	sys::mutex_callback<rtc_connection_quality_callback> connection_quality_event;
+	sys::mutex_callback<rtc_layer_switched_callback> layer_switched_event;
 
 private:
 	bool subscribe_audio(const char* uid, const char* track_id);
@@ -100,6 +109,16 @@ private:
 		int64_t timestamp,
 		int64_t duration
 		);
+
+	static void s_rtc_layer_switched_callback(void* context, const rtc_layer_switched_t* data);
+
+	static void s_rtc_keyframe_request_callback(void* context, const char* track_id);
+
+	static void s_rtc_custom_msg_callback(void* context, const rtc_custom_msg_t* msg);
+
+	static void s_rtc_active_speakers_callback(void* context, int64_t ts, const rtc_active_speaker_t* speakers, int speakers_count);
+
+	static void s_rtc_connection_quality_callback(void* context, const rtc_connection_quality_t* q);
 
 	void handle_timer(const asio::error_code& ec);
 private:
