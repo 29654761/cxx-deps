@@ -33,6 +33,9 @@
 #ifndef FMT_FORMAT_H_
 #define FMT_FORMAT_H_
 
+// 兼容新版 MSVC STL：补回已被移除的 stdext::checked_array_iterator。
+#include <spdlog/stdext_compat.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <cmath>

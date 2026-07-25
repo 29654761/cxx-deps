@@ -120,7 +120,10 @@ bool sip_tcp_connection::local_address(std::string& ip, int& port)const
 {
 	if (!socket_)
 		return false;
-	auto ep = socket_->local_endpoint();
+	std::error_code ec;
+	auto ep = socket_->local_endpoint(ec);
+	if (ec)
+		return false;
 	ip = ep.address().to_string();
 	port = ep.port();
 	return true;
