@@ -40,17 +40,21 @@ void blacklist::stop()
 
 bool blacklist::can_pass(const std::string& address)const
 {
-	if (log_)
-	{
-		log_->debug("Blacklist can_pass addr={}", address)->flush();
-	}
+
 	std::lock_guard<std::mutex> lock(mutex_);
 	auto itr = items_.find(address);
 	if (itr == items_.end())
+	{
 		return true;
-
+	}
 	if (itr->second.times < max_times_)
+	{
 		return true;
+	}
+	if (log_)
+	{
+		log_->debug("Blacklist rejected addr={}", address)->flush();
+	}
 
 	return false;
 }

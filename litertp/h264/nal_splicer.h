@@ -18,6 +18,7 @@ public:
 	nal_splicer();
 	~nal_splicer();
 
+	//送入一个nal数据，nal必须是移除0x00,0x00,0x00,0x01头的内容
 	void insert_nal(const uint8_t* nal, size_t size,int64_t pts,int64_t dts, std::vector<nal_item_t>& frames);
 
 	void clear() { nals_.clear(); }
