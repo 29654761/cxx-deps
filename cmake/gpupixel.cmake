@@ -11,14 +11,11 @@ message("CONFIG: ${CONFIG}")
 
 
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
-    set(LIBS
-        "${ROOT}/out/${ABI}-${CONFIG}/lib/gpupixel.lib"
-    )
+    file(GLOB_RECURSE LIBS "${ROOT}/out/${ABI}-${CONFIG}/lib/*.lib")
 else()
-    set(LIBS
-        "${ROOT}/out/${ABI}-${CONFIG}/lib/gpupixel.so"
-    )
+    file(GLOB_RECURSE LIBS "${ROOT}/out/${ABI}-${CONFIG}/lib/*.a")
 endif()
+
 
 
 target_include_directories(${PROJECT_NAME} PUBLIC
