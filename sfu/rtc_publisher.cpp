@@ -59,6 +59,42 @@ bool rtc_publisher::publish(void* channel_handler, const rtc_publish_options_t& 
 	return true;
 }
 
+bool rtc_publisher::publish_mcu(void* channel_handler, const rtc_publish_options_t& options,int kind)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (channel_handler_ || !channel_handler)
+		return false;
+
+	channel_handler_ = channel_handler;
+	options_ = options;
+	memset((void*)options_.desc, 0, 64);
+	strncpy(options_.desc, "mcu_video", 9);
+	if (kind == 0)
+	{
+		int r = rtc_publish_mcu_audio_track(channel_handler_, handle_, &options_);
+		if (r != RTC_OK)
+		{
+			channel_handler_ = nullptr;
+			return false;
+		}
+		return true;
+	}
+	else if (kind == 1)
+	{
+		int r = rtc_publish_mcu_video_track(channel_handler_, handle_, &options_);
+		if (r != RTC_OK)
+		{
+			channel_handler_ = nullptr;
+			return false;
+		}
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+
 void rtc_publisher::unpublish()
 {
 	std::lock_guard<std::mutex> lock(mutex_);

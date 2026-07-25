@@ -27,6 +27,9 @@ public:
 	void close();
 	
 	bool publish(void* channel_handler, const rtc_publish_options_t& options);
+
+	//发布mcu流，kind=0 音频；kind=1视频；
+	bool publish_mcu(void* channel_handler, const rtc_publish_options_t& options, int kind);
 	void unpublish();
 	bool write_sample(uint8_t* data, int length, uint32_t samples);
 private:

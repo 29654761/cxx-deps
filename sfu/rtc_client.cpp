@@ -107,48 +107,10 @@ bool rtc_client::leave_channel()
 	return true;
 }
 
-bool rtc_client::subscribe_audio(const char* uid, const char* track_id)
-{
-	std::lock_guard<std::mutex> lock(mutex_);
-	if (!handle_)
-		return false;
 
-	int r = rtc_subscribe_audio(handle_,uid,track_id);
-
-	if (log_)
-	{
-		log_->debug("Subscribe audio uid={}, trackid={}, result={}",uid,track_id, r)->flush();
-	}
-
-	if (r != RTC_OK)
-		return false;
-
-	return true;
-}
-
-bool rtc_client::subscribe_video(const char* uid, const char* track_id)
-{
-	std::lock_guard<std::mutex> lock(mutex_);
-	if (!handle_)
-		return false;
-
-	int r = rtc_subscribe_video(handle_,uid, track_id);
-	if (log_)
-	{
-		log_->debug("Subscribe video uid={}, trackid={}, result={}", uid, track_id, r)->flush();
-	}
-	if (r != RTC_OK)
-		return false;
-
-	return true;
-}
 
 bool rtc_client::subscribe_by_desc(const char* uid, const char* tdesc)
 {
-	std::lock_guard<std::mutex> lock(mutex_);
-	if (!handle_)
-		return false;
-
 	rtc_user_info_t user = {};
 	int r = rtc_get_user_info(handle_, uid, &user);
 	if (r != RTC_OK)
@@ -211,25 +173,9 @@ bool rtc_client::subscribe_by_desc(const char* uid, const char* tdesc)
 	return false;
 }
 
-bool rtc_client::unsubscribe(const char* uid, const char* track_id)
-{
-	std::lock_guard<std::mutex> lock(mutex_);
-	if (!handle_)
-		return false;
-
-	int r = rtc_unsubscribe(handle_,uid,track_id);
-	if (r != RTC_OK)
-		return false;
-
-	return true;
-}
 
 bool rtc_client::unsubscribe_by_desc(const char* uid, const char* tdesc)
 {
-	std::lock_guard<std::mutex> lock(mutex_);
-	if (!handle_)
-		return false;
-
 	rtc_user_info_t user = {};
 	int r = rtc_get_user_info(handle_, uid, &user);
 	if (r != RTC_OK)
@@ -258,24 +204,24 @@ bool rtc_client::subscribe_all_items()
 	{
 		if (!itr->result)
 		{
-			bool result=subscribe_by_desc(itr->uid.c_str(), itr->tdesc.c_str());
-			set_subscribe_result(itr->uid.c_str(), itr->tdesc.c_str(), result);
+			bool result=subscribe_track(*itr);
+			set_subscribe_result(itr->uid.c_str(), itr->track.c_str(), itr->track_type, result);
 		}
 	}
 
 	return true;
 }
 
-void rtc_client::set_subscribe_result(const char* uid, const char* tdesc, bool result)
+void rtc_client::set_subscribe_result(const char* uid, const char* track, track_type_t track_type, bool result)
 {
 	std::lock_guard<std::mutex> lock(mutex_);
 	for (auto itr = subscribe_items_.begin(); itr != subscribe_items_.end(); itr++)
 	{
 		if (itr->uid == uid)
 		{
-			if (tdesc)
+			if (track)
 			{
-				if (itr->tdesc == tdesc)
+				if (itr->track == track &&itr->track_type== track_type)
 				{
 					itr->result = result;
 				}
@@ -298,18 +244,71 @@ void rtc_client::set_all_subscribe_result(bool result)
 	}
 }
 
-bool rtc_client::add_subscribe(const char* uid, const char* tdesc)
+bool rtc_client::subscribe_track(const subscribe_item& item)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!handle_)
+		return false;
+
+	switch (item.track_type)
+	{
+	case track_type_t::tid_audio:
+	{
+		int r=rtc_subscribe_audio(handle_, item.uid.c_str(), item.track.c_str());
+		return r == RTC_OK;
+	}
+	case track_type_t::tid_video:
+	{
+		int r = rtc_subscribe_video(handle_, item.uid.c_str(), item.track.c_str());
+		return r == RTC_OK;
+	}
+	case track_type_t::tdesc:
+	{
+		return subscribe_by_desc(item.uid.c_str(), item.track.c_str());
+	}
+	default:
+		return false;
+	}
+	
+}
+
+bool rtc_client::unsubscribe_track(const subscribe_item& item)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!handle_)
+		return false;
+
+	switch (item.track_type)
+	{
+	case track_type_t::tid_audio:
+	case track_type_t::tid_video:
+	{
+		int r = rtc_unsubscribe(handle_,item.uid.c_str(), item.track.c_str());
+		return r == RTC_OK;
+	}
+	case track_type_t::tdesc:
+	{
+		return unsubscribe_by_desc(item.uid.c_str(), item.track.c_str());
+	}
+	default:
+		return false;
+	}
+
+}
+
+bool rtc_client::add_subscribe(const char* uid, const char* track, track_type_t ttype)
 {
 	std::lock_guard<std::mutex> lock(mutex_);
 	auto itr=std::find_if(subscribe_items_.begin(), subscribe_items_.end(),
-		[uid,tdesc](const subscribe_item& a) {
-		return a.uid == uid && a.tdesc == tdesc;
+		[uid, track,ttype](const subscribe_item& a) {
+		return a.uid == uid &&a.track_type== ttype && a.track == track;
 	});
 	if (itr == subscribe_items_.end())
 	{
 		subscribe_item item = {};
 		item.uid = uid;
-		item.tdesc = tdesc;
+		item.track = track;
+		item.track_type = ttype;
 		item.result = false;
 		subscribe_items_.push_back(item);
 	}
@@ -319,20 +318,20 @@ bool rtc_client::add_subscribe(const char* uid, const char* tdesc)
 	}
 	if (log_)
 	{
-		log_->debug("Add subscribe uid={}, tdesc={}", uid,tdesc)->flush();
+		log_->debug("Add subscribe uid={}, track={}, type={}", uid,track,ttype)->flush();
 	}
 	return true;
 }
 
-bool rtc_client::remove_subscribe(const char* uid, const char* tdesc)
+bool rtc_client::remove_subscribe(const char* uid, const char* track, track_type_t ttype)
 {
 	subscribe_item item = {};
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 
 		auto itr = std::find_if(subscribe_items_.begin(), subscribe_items_.end(),
-			[uid, tdesc](const subscribe_item& a) {
-			return a.uid == uid && a.tdesc == tdesc;
+			[uid, track, ttype](const subscribe_item& a) {
+			return a.uid == uid &&a.track_type== ttype && a.track == track;
 		});
 
 		if (itr == subscribe_items_.end())
@@ -341,11 +340,11 @@ bool rtc_client::remove_subscribe(const char* uid, const char* tdesc)
 		subscribe_items_.erase(itr);
 	}
 
-	unsubscribe_by_desc(item.uid.c_str(), item.tdesc.c_str());
+	unsubscribe_track(item);
 
 	if (log_)
 	{
-		log_->debug("Remove subscribe uid={}, tdesc={}", uid, tdesc)->flush();
+		log_->debug("Remove subscribe uid={}, track={}, type={}", uid,track,ttype)->flush();
 	}
 	return true;
 }
@@ -363,7 +362,7 @@ void rtc_client::clear_subscribes()
 	{
 		if (itr->result)
 		{
-			unsubscribe_by_desc(itr->uid.c_str(), itr->tdesc.c_str());
+			unsubscribe_track(*itr);
 		}
 	}
 }
@@ -496,7 +495,7 @@ void rtc_client::s_rtc_user_event_callback(
 	if (event_type == 0)
 	{
 		p->ios_.post([p,uid]() {
-			p->set_subscribe_result(uid, nullptr, false);
+			p->set_subscribe_result(uid, nullptr, track_type_t::unknown,false);
 		});
 	}
 
@@ -514,7 +513,7 @@ void rtc_client::s_rtc_track_event_callback(
 	if (event_type == 0)
 	{
 		p->ios_.post([p, uid, track_info]() {
-			p->set_subscribe_result(uid, track_info->desc, false);
+			p->set_subscribe_result(uid, track_info->desc,track_type_t::tdesc, false);
 		});
 		
 	}

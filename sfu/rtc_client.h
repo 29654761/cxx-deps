@@ -15,11 +15,19 @@
 class rtc_client :public std::enable_shared_from_this<rtc_client>
 {
 public:
+	enum class track_type_t
+	{
+		unknown=0,
+		tid_audio=1,
+		tid_video=2,
+		tdesc=3,
+	};
 
 	struct subscribe_item
 	{
 		std::string uid;
-		std::string tdesc;
+		std::string track;
+		track_type_t track_type = track_type_t::tdesc;
 		bool result = false;
 	};
 
@@ -49,8 +57,8 @@ public:
 
 
 
-	bool add_subscribe(const char* uid, const char* tdesc);
-	bool remove_subscribe(const char* uid, const char* tdesc);
+	bool add_subscribe(const char* uid, const char* track, track_type_t ttype);
+	bool remove_subscribe(const char* uid, const char* tdesc, track_type_t ttype);
 	void clear_subscribes();
 	void all_subscribes(std::vector<subscribe_item>& subs)const;
 
@@ -72,15 +80,15 @@ public:
 	sys::mutex_callback<rtc_layer_switched_callback> layer_switched_event;
 
 private:
-	bool subscribe_audio(const char* uid, const char* track_id);
-	bool subscribe_video(const char* uid, const char* track_id);
 	bool subscribe_by_desc(const char* uid, const char* tdesc);
-	bool unsubscribe(const char* uid, const char* track_id);
 	bool unsubscribe_by_desc(const char* uid, const char* tdesc);
 	bool subscribe_all_items();
 	//tdesc is null will set all tracks
-	void set_subscribe_result(const char* uid, const char* tdesc, bool result);
+	void set_subscribe_result(const char* uid, const char* track, track_type_t track_type, bool result);
 	void set_all_subscribe_result(bool result);
+
+	bool subscribe_track(const subscribe_item& item);
+	bool unsubscribe_track(const subscribe_item& item);
 private:
 	static void s_rtc_connection_callback(
 		void* context,
