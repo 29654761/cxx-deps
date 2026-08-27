@@ -5,10 +5,10 @@ namespace sys
 
 	fs::path fs_relative(fs::path p, fs::path base)
 	{
-		std::error_code ec;
+		//std::error_code ec;   //fs::absolute ec can not be supported in experimental/filesystem, so we will not use it here
 		// 1. convert p and base to absolute paths
-		p = fs::absolute(p,ec);
-		base = fs::absolute(base,ec);
+		p = fs::absolute(p);
+		base = fs::absolute(base);
 
 		// 2. find first mismatch and shared root path
 		auto mismatched = std::mismatch(p.begin(), p.end(), base.begin(), base.end());

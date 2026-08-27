@@ -22,6 +22,7 @@ endif()
 
 if(STD_FS_EX)
     add_definitions(-D_STD_FS_EX)
+    #需要安装libstdc++-static
     target_link_libraries(${PROJECT_NAME} PRIVATE stdc++fs)
 endif()
 
