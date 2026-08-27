@@ -70,8 +70,8 @@ namespace voip
 			bool is_gk_started()const;
 			bool gk_status()const;
 
-			call_ptr make_call(const std::string& url,bool tcp=true);
-			call_ptr make_reg_server_call(const std::string& alias);
+			call_ptr make_call(const std::string& url ,const std::string& local_alias="", bool tcp = true);
+			call_ptr make_reg_server_call(const std::string& alias, const std::string& local_alias = "");
 			call_ptr make_reg_client_call(const std::string& alias);
 
 			inline void set_blacklist(blacklist_ptr blacklist) {

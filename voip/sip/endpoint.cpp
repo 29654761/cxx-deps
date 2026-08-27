@@ -188,7 +188,7 @@ namespace voip
 			return gkclient_->status();
 		}
 
-		call_ptr endpoint::make_call(const std::string& url, bool tcp)
+		call_ptr endpoint::make_call(const std::string& url, const std::string& local_alias, bool tcp)
 		{
 			if (!active_ || !server_)
 				return nullptr;
@@ -201,7 +201,10 @@ namespace voip
 
 			auto self = shared_from_this();
 
-			std::string alias = local_alias();
+			std::string alias = local_alias;
+			if (alias.empty()) {
+				alias = this->local_alias();
+			}
 			std::string nat = nat_address();
 			auto rtp = rtp_ports();
 			auto call = std::make_shared<sip_call>(self, con, alias,"", voip::call::direction_t::outgoing, nat, port_, rtp);
@@ -215,14 +218,17 @@ namespace voip
 			return call;
 		}
 
-		call_ptr endpoint::make_reg_server_call(const std::string& alias)
+		call_ptr endpoint::make_reg_server_call(const std::string& alias, const std::string& local_alias)
 		{
 			reg_endpoint ep;
 			if (!get_reg_endpoint(alias, ep))
 				return nullptr;
 
 			auto self = shared_from_this();
-			std::string lalias = local_alias();
+			std::string lalias = local_alias;
+			if (lalias.empty()) {
+				lalias = this->local_alias();
+			}
 			std::string nat = nat_address();
 			auto rtp = rtp_ports();
 
@@ -256,7 +262,7 @@ namespace voip
 			std::string nat = nat_address();
 			auto rtp = rtp_ports();
 
-			auto call = std::make_shared<sip_call>(self, gkcon, gkclient->alias(), "", voip::call::direction_t::outgoing, nat, port_, rtp);
+			auto call = std::make_shared<sip_call>(self, gkcon, gkclient->alias(),"", voip::call::direction_t::outgoing, nat, port_, rtp);
 			voip_uri vurl;
 			vurl.username = alias;
 			if (!gkcon->remote_address(vurl.host, vurl.port))
