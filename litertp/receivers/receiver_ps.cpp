@@ -33,7 +33,6 @@ namespace litertp
 		{
 			return false;
 		}
-
 		std::vector<packet_ptr> frame;
 		while (find_a_frame(frame))
 		{

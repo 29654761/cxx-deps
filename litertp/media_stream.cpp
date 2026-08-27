@@ -1352,6 +1352,11 @@ namespace litertp
 
 	bool media_stream::send_frame(const uint8_t* frame, uint32_t size, uint32_t duration)
 	{
+		auto local_sdp = this->get_local_sdp();
+		if (local_sdp.trans_mode != rtp_trans_mode_sendonly && local_sdp.trans_mode != rtp_trans_mode_sendrecv)
+			return false;
+
+
 		auto sender= get_default_sender();
 		if (!sender)
 		{
