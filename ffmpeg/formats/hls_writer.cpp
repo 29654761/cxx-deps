@@ -121,7 +121,7 @@ namespace ffmpeg
 				{
 					std::string sdur = line.substr(8);
 					double dur=strtod(sdur.c_str(), &endptr);
-					duration += (int64_t)(dur * 1000000);
+					duration += (int64_t)(dur * 1000);
 				}
 
 			}
