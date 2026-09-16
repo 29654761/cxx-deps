@@ -7,11 +7,12 @@
 #include "http_request.h"
 #include "http_response.h"
 #include <curl/curl.h>
+#include <spdlog/spdlogger.hpp>
 
 class http_client
 {
 public:
-	http_client();
+	http_client(spdlogger_ptr log=nullptr);
 	~http_client();
 
 	static bool global_init();
@@ -24,6 +25,7 @@ private:
 
 	bool config_curl(const http_request& request);
 private:
+	spdlogger_ptr log_;
 	CURL* curl_ = nullptr;
 };
 

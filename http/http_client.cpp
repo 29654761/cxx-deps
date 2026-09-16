@@ -4,8 +4,9 @@
 
 #ifdef HYPERTEXT_CURL
 
-http_client::http_client()
+http_client::http_client(spdlogger_ptr log)
 {
+	log_ = log;
 	curl_ = curl_easy_init();
 }
 
@@ -37,6 +38,7 @@ bool http_client::request(const http_request& request, http_response& response)
 	{
 		return false;
 	}
+
 	curl_slist* headers = nullptr;
 	for (auto itr = request.headers.items.begin(); itr != request.headers.items.end(); itr++)
 	{
@@ -57,11 +59,19 @@ bool http_client::request(const http_request& request, http_response& response)
 
 	curl_slist_free_all(headers);
 	if (rc != CURLcode::CURLE_OK) {
+		if (log_)
+		{
+			log_->error("http_client::request failed: url={} error={}", request.url(), curl_easy_strerror(rc))->flush();
+		}
 		return false;
 	}
 
 	if(!response.parse(rsp))
 	{
+		if (log_)
+		{
+			log_->error("http_client::request failed: url={} parse response error: rsp={}", request.url(), rsp)->flush();
+		}
 		return false;
 	}
 
