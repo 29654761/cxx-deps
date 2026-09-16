@@ -366,7 +366,6 @@ namespace voip
 			rtp_.set_remote_sdp(remote_sdp,sdp_type_offer);
 			auto sdp=rtp_.create_answer();
 			sdp.bundle = false;
-			std::string s = sdp.to_string();
 			/*
 			std::stringstream ss;
 			ss << "v=0" << std::endl;
@@ -401,12 +400,14 @@ namespace voip
 			auto self = shared_from_this();
 			for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
 			{
+				itr->protos.erase("UDP");
 				if (on_open_media)
 				{
 					on_open_media(self, itr->media_type, itr->mid);
 				}
 			}
 
+			std::string s = sdp.to_string();
 			if (!invite_rsp(invite_, s))
 			{
 				return false;

@@ -196,6 +196,10 @@ namespace voip
 
 			sip_address contact;
 			contact.url = from.url;
+			if (is_tcp_)
+			{
+				contact.url.add("transport", "tcp");
+			}
 			uint32_t cseq = get_cseq();
 
 			std::vector<sip_via> vias;
@@ -239,6 +243,10 @@ namespace voip
 
 			sip_address contact;
 			contact.url = from.url;
+			if (is_tcp_)
+			{
+				contact.url.add("transport", "tcp");
+			}
 
 			uint32_t cseq = get_cseq();
 
