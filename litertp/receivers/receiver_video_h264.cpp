@@ -226,7 +226,7 @@ namespace litertp
 
 					h264::nal_header_t nalh = { 0 };
 					h264::nal_header_set(&nalh,*nal_data);
-					if (fui.t == 7 || fui.t == 8 || fui.t == 5)
+					if (nalh.t == 7 || nalh.t == 8 || nalh.t == 5)
 					{
 						waiting_for_keyframe_ = false;
 					}
@@ -274,7 +274,7 @@ namespace litertp
 
 					h264::nal_header_t nalh = { 0 };
 					h264::nal_header_set(&nalh, *nal_data);
-					if (fui.t == 7 || fui.t == 8 || fui.t == 5)
+					if (nalh.t == 7 || nalh.t == 8 || nalh.t == 5)
 					{
 						waiting_for_keyframe_ = false;
 					}
@@ -318,7 +318,7 @@ namespace litertp
 
 					h264::nal_header_t nalh = { 0 };
 					h264::nal_header_set(&nalh, *nal_data);
-					if (fui.t == 7 || fui.t == 8 || fui.t == 5)
+					if (nalh.t == 7 || nalh.t == 8 || nalh.t == 5)
 					{
 						waiting_for_keyframe_ = false;
 					}
@@ -368,7 +368,7 @@ namespace litertp
 
 					h264::nal_header_t nalh = { 0 };
 					h264::nal_header_set(&nalh, *nal_data);
-					if (fui.t == 7 || fui.t == 8 || fui.t == 5)
+					if (nalh.t == 7 || nalh.t == 8 || nalh.t == 5)
 					{
 						waiting_for_keyframe_ = false;
 					}
