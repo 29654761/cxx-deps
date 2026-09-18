@@ -135,7 +135,7 @@ namespace rtpx
 			}
 			if (log_)
 			{
-				log_->warn("H264 Drop rtp packet seq={}",i)->flush();
+				log_->warn("H264 Drop rtp packet seq={}",i-1)->flush();
 			}
 			recv_packs_[idx].reset();
 

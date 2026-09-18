@@ -90,6 +90,8 @@ namespace litertp
 			}
 
 			reset_ = false;
+
+			LOGD("Reset rtp packet buffer\n");
 		}
 
 
@@ -318,7 +320,7 @@ namespace litertp
 			if ((nack_pkts.size() >= 1000|| waiting_for_keyframe_))
 			{
 				clear_nack();
-				reset_ = true;
+				//reset_ = true;  //不要开启此项，否则在乱序环境下会经常遇到reset清空缓冲区，导致错过I帧。
 				if (media_type_ == media_type_video)
 				{
 					double now = time_util::cur_time();

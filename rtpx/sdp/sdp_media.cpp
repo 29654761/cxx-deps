@@ -677,7 +677,7 @@ namespace rtpx {
 
 
 
-				 uint8_t profile_id1 = fmt_in->fmtp.profile_id();
+				 uint8_t profile_id1 = fmt_in.fmtp.profile_id();
 				 uint8_t profile_id2 = itr.second.fmtp.profile_id();
 				 if (profile_id1 > 0 && profile_id2 > 0 && profile_id1 != profile_id2)
 					 continue;

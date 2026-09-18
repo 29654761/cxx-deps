@@ -101,6 +101,7 @@ namespace litertp
 			recv_packs_[idx].reset();
 		}
 
+		printf("take pkts begin=%d, end=%d\n", *idx_lst.begin(),*(idx_lst.end()-1));
 		return true;
 	}
 
@@ -135,7 +136,7 @@ namespace litertp
 				waiting_for_keyframe_ = true;
 			}
 
-			LOGD("drop packet %d\n",idx);
+			LOGD("drop packet %u\n",i-1);
 			recv_packs_[idx].reset();
 
 			if (pkt->handle_->header->m==1)
@@ -157,11 +158,13 @@ namespace litertp
 
 		packet_ptr first_pkt;
 		std::string fu_frame_data;
-		
+
+
 		for (auto pkt : pkts)
 		{
 			const uint8_t* payload = pkt->payload();
 			int payload_size = (int)pkt->payload_size();
+
 
 			if (payload_size < 2)
 			{
@@ -174,6 +177,7 @@ namespace litertp
 			{
 				continue;
 			}
+
 			av_frame_t frame;
 			memset(&frame, 0, sizeof(frame));
 			frame.ct = codec_type_h264;

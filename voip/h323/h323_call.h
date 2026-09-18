@@ -189,6 +189,9 @@ namespace voip
 			void on_master_slave_determination_ack(const H245_MasterSlaveDeterminationAck& body);
 			void on_master_slave_determination_reject(const H245_MasterSlaveDeterminationReject& body);
 
+			void on_terminal_capability_complete();
+			void on_master_slave_determination_complete(master_slave_status_t my_role);
+
 			void on_open_logical_channel(const H245_OpenLogicalChannel& body);
 			void on_open_logical_channel_ack(const H245_OpenLogicalChannelAck& body);
 			void on_open_logical_channel_reject(const H245_OpenLogicalChannelReject& body);
@@ -275,6 +278,10 @@ namespace voip
 			unsigned mcu_number_ = 0;
 			unsigned terminal_number_ = 0;
 			bool h239_token_owned_ = false;
+
+			bool tcs_ready_ = false;   //terminal_capability 是否完成, tcs交互只需要收到对方的能力集就可以进行推流了，不需要等双方完成
+			bool msd_sent_ = false;   //对方已经回复了master_slave_determination_ack, 表示我已经发送成功
+			bool msd_recv_ = true;   //我已经收到了对方的master_slave_determination，并且已经回复了ack
 		};
 
 		

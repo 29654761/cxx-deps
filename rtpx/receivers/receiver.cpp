@@ -97,6 +97,7 @@ namespace rtpx
 			}
 
 			reset_ = false;
+			LOGD("Reset rtp packet buffer\n");
 		}
 
 
@@ -350,7 +351,7 @@ namespace rtpx
 		{
 			// The nack list is full or need require keyframe, reset list.
 			clear_nack();
-			reset_ = true;
+			//reset_ = true;  //不要开启此项，否则在乱序环境下会经常遇到reset清空缓冲区，导致错过I帧。
 			if (media_type_ == media_type_video)
 			{
 				double now = sys::util::cur_time_db();

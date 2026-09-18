@@ -2731,8 +2731,8 @@ namespace voip
 
 			this->send_terminal_capability_set_ack(body.m_sequenceNumber);
 			rtp_.start();
-			start_open_local_chnnnels();
-
+			tcs_ready_ = true;
+			on_terminal_capability_complete();
 			if (log_)
 			{
 				std::string url = url_.to_string();
@@ -2802,11 +2802,8 @@ namespace voip
 			if (master_slave_status_ != master_slave_status_t::indeterminate)
 			{
 				send_master_slave_determination_ack(master_slave_status_ != master_slave_status_t::master);
-				if (log_)
-				{
-					std::string url = url_.to_string();
-					log_->debug("H.323: master_slave_determination ,url={},myrole={}", url, (int)master_slave_status_)->flush();
-				}
+				msd_recv_ = true;
+				on_master_slave_determination_complete(master_slave_status_);
 			}
 			else
 			{
@@ -2848,12 +2845,8 @@ namespace voip
 				master_slave_status_ = status;
 				send_master_slave_determination_ack(master_slave_status_ != master_slave_status_t::master);
 			}
-
-			if (log_)
-			{
-				std::string url = url_.to_string();
-				log_->debug("H.323: on_master_slave_determination_ack,url={}, myrole={}", url, (int)master_slave_status_)->flush();
-			}
+			msd_sent_ = true;
+			on_master_slave_determination_complete(master_slave_status_);
 		}
 
 		void h323_call::on_master_slave_determination_reject(const H245_MasterSlaveDeterminationReject& body)
@@ -2862,6 +2855,28 @@ namespace voip
 			{
 				std::string url = url_.to_string();
 				log_->debug("H.323: on_master_slave_determination_reject ,url={}", url)->flush();
+			}
+		}
+
+		void h323_call::on_terminal_capability_complete()
+		{
+			if (tcs_ready_&&msd_sent_&&msd_recv_)
+			{
+				start_open_local_chnnnels();
+			}
+
+		}
+
+		void h323_call::on_master_slave_determination_complete(master_slave_status_t my_role)
+		{
+			if (log_)
+			{
+				std::string url = url_.to_string();
+				log_->debug("H.323: master_slave_determination ,url={},myrole={}", url, (int)master_slave_status_)->flush();
+			}
+			if (tcs_ready_ && msd_sent_ && msd_recv_)
+			{
+				start_open_local_chnnnels();
 			}
 		}
 
