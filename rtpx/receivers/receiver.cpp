@@ -97,7 +97,10 @@ namespace rtpx
 			}
 
 			reset_ = false;
-			LOGD("Reset rtp packet buffer\n");
+			if (log_)
+			{
+				log_->trace("Reset rtp packet buffer")->flush();
+			}
 		}
 
 
@@ -130,7 +133,7 @@ namespace rtpx
 			//the lost seq is received.
 			if (log_)
 			{
-				log_->trace("The lost seq is received seq={}", pkt->header()->seq);
+				log_->trace("The lost seq is received seq={}", pkt->header()->seq)->flush();
 			}
 		}
 		else
