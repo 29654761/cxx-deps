@@ -68,7 +68,7 @@ namespace voip
 		void set_url(const voip_uri& url) { url_ = url; }
 		void set_auto_keyframe_interval(int interval) { auto_keyframe_interval_ = interval; }
 		virtual std::string id()const = 0;
-		virtual bool start(bool audio,bool video) = 0;
+		virtual bool start(bool audio,bool video,bool use_rtp_address) = 0;
 		virtual void stop(voip::call::reason_code_t reason) = 0;
 		virtual bool require_keyframe() = 0;
 		virtual bool answer() = 0;
@@ -96,6 +96,7 @@ namespace voip
 
 		call_type_t call_type()const { return call_type_; }
 
+		void use_rtp_address(bool use) { use_rtp_address_ = use; }
 	protected:
 		void set_on_destroy(on_destroy_t handler) { on_destroy = handler; }
 		void set_on_incoming_call(on_incoming_call_t handler) { on_incoming_call = handler; }
@@ -138,6 +139,8 @@ namespace voip
 		call_type_t call_type_ = call_type_t::unknown;
 
 		std::atomic<bool> triggered_connected_;
+
+		bool use_rtp_address_ = false;
 	};
 
 	

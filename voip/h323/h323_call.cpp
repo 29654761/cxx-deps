@@ -149,13 +149,13 @@ namespace voip
 			return (const std::string&)call_id_.AsString();
 		}
 
-		bool h323_call::start(bool audio, bool video)
+		bool h323_call::start(bool audio, bool video, bool use_rtp_address)
 		{
 			std::lock_guard<std::recursive_mutex> lk(mutex_);
 			bool experted = false;
 			if(!active_.compare_exchange_strong(experted, true))
 				return true;
-
+			this->use_rtp_address(use_rtp_address);
 			//h245_sending_queue_->set_logger(log_);
 			if (audio)
 			{

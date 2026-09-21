@@ -20,7 +20,7 @@ namespace voip
 			bool set_invite(const sip_message& invite);
 
 			virtual std::string id()const;
-			virtual bool start(bool audio, bool video);
+			virtual bool start(bool audio, bool video, bool use_rtp_address);
 			virtual void stop(voip::call::reason_code_t reason);
 			virtual bool require_keyframe();
 			virtual bool answer();

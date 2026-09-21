@@ -102,7 +102,7 @@ namespace voip
 			static std::string create_branch();
 			static std::string create_tag();
 
-
+			void use_rtp_address(bool use) { use_rtp_address_ = use; }
 		private:
 			void set_gkclient(std::shared_ptr<gk_client> gkclient);
 			std::shared_ptr<gk_client> get_gkclient()const;
@@ -151,6 +151,7 @@ namespace voip
 			bool incoming_audio_ = true;
 			bool incoming_video_ = true;
 			int max_bitrate_ = 2048;
+			bool use_rtp_address_ = false;
 
 			std::shared_ptr<gk_client> gkclient_;
 

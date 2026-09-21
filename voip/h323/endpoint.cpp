@@ -330,7 +330,7 @@ namespace voip
 				callptr->set_max_bitrate(max_bitrate());
 				callptr->set_on_facility_event(std::bind(&endpoint::handle_facility, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 				add_call(callptr);
-				if (callptr->start(incoming_audio_, incoming_video_))
+				if (callptr->start(incoming_audio_, incoming_video_, use_rtp_address_))
 				{
 					if (log_)
 					{
@@ -626,7 +626,7 @@ namespace voip
 			callptr->set_gk_client(gkclient);
 			callptr->facility(url, callId,confId);
 			add_call(callptr);
-			callptr->start(incoming_audio_, incoming_video_);
+			callptr->start(incoming_audio_, incoming_video_, use_rtp_address_);
 		}
 
 

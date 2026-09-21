@@ -199,14 +199,14 @@ namespace voip
 			return call_id_;
 		}
 
-		bool sip_call::start(bool audio,bool video)
+		bool sip_call::start(bool audio,bool video, bool use_rtp_address)
 		{
 			std::lock_guard<std::recursive_mutex> lk(mutex_);
 			bool experted = false;
 			if (!active_.compare_exchange_strong(experted, true))
 				return true;
 
-
+			this->use_rtp_address(use_rtp_address);
 			set_con(con_tmp_);
 			con_tmp_.reset();
 

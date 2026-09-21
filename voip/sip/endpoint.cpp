@@ -804,7 +804,7 @@ namespace voip
 			
 
 			set_call(call);
-			call->start(incoming_audio_, incoming_video_);
+			call->start(incoming_audio_, incoming_video_, use_rtp_address_);
 		}
 
 		void endpoint::on_ack(sip_connection_ptr con, const sip_message& message)

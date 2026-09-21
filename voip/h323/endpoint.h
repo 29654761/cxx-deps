@@ -62,6 +62,8 @@ namespace voip
 			call_ptr make_call(const std::string& url,const std::string& local_alias="", const std::string& call_id = "", const std::string& conf_id = "", int call_ref = -1);
 			call_ptr make_reg_server_call(const std::string& alias,gk_server_ptr gkserver);
 			call_ptr make_reg_client_call(const std::string& alias);
+
+			void use_rtp_address(bool use) { use_rtp_address_ = use; }
 		private:
 			void handle_timer(endpoint_ptr self, const std::error_code& ec);
 			void handle_accept(endpoint_ptr self, const std::error_code& ec, asio::ip::tcp::socket socket);
@@ -110,6 +112,7 @@ namespace voip
 			bool incoming_audio_ = true;
 			bool incoming_video_ = true;
 			int max_bitrate_ = 7865;
+			bool use_rtp_address_ = false;
 
 			sys::echo<std::string, voip::call_ptr> echo_gks_call_;
 		};
