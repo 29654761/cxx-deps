@@ -660,7 +660,7 @@ namespace voip
 			ms = rtp_.create_media_stream(mid, mt, 0, nat_address_.c_str(), rtp_ports_, false);
 			if (ms)
 			{
-				ms->use_rtp_address(true);
+				ms->use_rtp_address(use_rtp_address_);
 				if (mt == media_type_video)
 				{
 					ms->on_require_keyframe.add(s_litertp_on_require_keyframe, this);

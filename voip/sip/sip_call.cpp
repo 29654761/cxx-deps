@@ -39,7 +39,7 @@ namespace voip
 			if (!ms) {
 				return false;
 			}
-			ms->use_rtp_address(true);
+			ms->use_rtp_address(use_rtp_address_);
 			ms->add_local_audio_track(codec_type_pcma, 8, 8000);
 			return true;
 		}
@@ -52,7 +52,7 @@ namespace voip
 			if (!ms) {
 				return false;
 			}
-			ms->use_rtp_address(true);
+			ms->use_rtp_address(use_rtp_address_);
 			ms->add_local_audio_track(codec_type_pcma, 8, 8000);
 			return true;
 		}
@@ -67,7 +67,7 @@ namespace voip
 			if (!ms) {
 				return false;
 			}
-			ms->use_rtp_address(true);
+			ms->use_rtp_address(use_rtp_address_);
 			{
 				ms->add_local_video_track(codec_type_h264, 96, 90000, true);
 				
@@ -103,7 +103,7 @@ namespace voip
 			if (!ms) {
 				return false;
 			}
-			ms->use_rtp_address(true);
+			ms->use_rtp_address(use_rtp_address_);
 			{
 				ms->add_local_video_track(codec_type_h264, 96, 90000, true);
 
@@ -140,7 +140,7 @@ namespace voip
 			if (!ms) {
 				return false;
 			}
-			ms->use_rtp_address(true);
+			ms->use_rtp_address(use_rtp_address_);
 			ms->add_local_video_track(codec_type_h265, 100, 90000, true);
 			litertp::fmtp fmtp;
 			fmtp.set_profile_id(1);
@@ -163,7 +163,7 @@ namespace voip
 			if (!ms) {
 				return false;
 			}
-			ms->use_rtp_address(true);
+			ms->use_rtp_address(use_rtp_address_);
 			ms->add_local_video_track(codec_type_h265, 100, 90000, true);
 			litertp::fmtp fmtp;
 			fmtp.set_profile_id(1);

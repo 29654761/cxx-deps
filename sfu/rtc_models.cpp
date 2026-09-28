@@ -55,7 +55,6 @@ void rtc_user::from_struct(const rtc_user_info_t* info)
 	join_at = info->join_at;
 	leave_at = info->leave_at;
 	updated_at = info->updated_at;
-	link_id = info->link_id;
 
 	stream_tracks.clear();
 	if (info->stream_tracks && info->stream_track_count > 0)

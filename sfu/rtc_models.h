@@ -51,7 +51,6 @@ public:
 	int64_t join_at = 0;
 	int64_t leave_at = 0;
 	int64_t updated_at = 0;
-	int64_t link_id = 0;
 	std::vector<rtc_track> stream_tracks;
 };
 
