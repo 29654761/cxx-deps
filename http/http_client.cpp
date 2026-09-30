@@ -114,8 +114,10 @@ bool http_client::config_curl(const http_request& request)
 	//	curl_easy_setopt(curl_, CURLOPT_POSTFIELDSIZE, request.body.size());
 	//}
 	curl_easy_setopt(curl_, CURLOPT_NOSIGNAL, 1L);
-	curl_easy_setopt(curl_, CURLOPT_TIMEOUT, 10L);
-	curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 5L);
+	curl_easy_setopt(curl_, CURLOPT_TIMEOUT, 0L);
+	curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 30L);
+	curl_easy_setopt(curl_, CURLOPT_LOW_SPEED_LIMIT, 1024L);  // Speed low than 1 KB/s
+	curl_easy_setopt(curl_, CURLOPT_LOW_SPEED_TIME, 30L);       // Over 30s 
 	curl_easy_setopt(curl_, CURLOPT_AUTOREFERER, 1L);
 	curl_easy_setopt(curl_, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl_, CURLOPT_MAXREDIRS, 3L);
