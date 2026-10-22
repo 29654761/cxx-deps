@@ -17,6 +17,7 @@ namespace voip
 		rtp_ports_ = rtp_ports;
 		rtp_.on_frame.add(s_litertp_on_frame, this);
 		rtp_.on_received_require_keyframe.add(s_litertp_on_received_require_keyframe, this);
+		rtp_.on_dtmf.add(s_litertp_on_dtmf, this);
 		update();
 	}
 
@@ -106,6 +107,57 @@ namespace voip
 		if (p->on_received_require_keyframe)
 		{
 			p->on_received_require_keyframe(self);
+		}
+	}
+
+	void call::s_litertp_on_dtmf(void* ctx, const char* mid, uint32_t ssrc, uint8_t event, uint32_t duration_ms)
+	{
+		call* p = (call*)ctx;
+		char digit = dtmf_event_to_digit(event);
+		if (digit == 0)
+		{
+			// Flash 等非按键事件不上报
+			return;
+		}
+		p->invoke_dtmf(digit, (int)duration_ms);
+	}
+
+	char call::dtmf_event_to_digit(uint8_t event)
+	{
+		static const char digits[] = "0123456789*#ABCD";
+		if (event < 16)
+		{
+			return digits[event];
+		}
+		return 0;
+	}
+
+	void call::invoke_dtmf(char digit, int duration_ms)
+	{
+		// 统一转成大写，只放行 0-9 * # A-D
+		if (digit >= 'a' && digit <= 'd')
+		{
+			digit = digit - 'a' + 'A';
+		}
+		bool valid = (digit >= '0' && digit <= '9') || digit == '*' || digit == '#' || (digit >= 'A' && digit <= 'D');
+		if (!valid)
+		{
+			return;
+		}
+		if (duration_ms < 0)
+		{
+			duration_ms = 0;
+		}
+
+		if (log_)
+		{
+			log_->info("Call {} received dtmf: digit={} duration={}ms", id(), digit, duration_ms)->flush();
+		}
+
+		if (on_dtmf)
+		{
+			auto self = shared_from_this();
+			on_dtmf(self, digit, duration_ms);
 		}
 	}
 

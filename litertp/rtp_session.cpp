@@ -100,6 +100,7 @@ namespace litertp
 		if (mt != media_type_application)
 		{
 			m->on_frame_received.add(s_litertp_on_frame, this);
+			m->on_dtmf_received.add(s_litertp_on_dtmf, this);
 		}
 		else
 		{
@@ -167,6 +168,7 @@ namespace litertp
 		if (mt != media_type_application)
 		{
 			m->on_frame_received.add(s_litertp_on_frame, this);
+			m->on_dtmf_received.add(s_litertp_on_dtmf, this);
 		}
 		else
 		{
@@ -646,6 +648,12 @@ namespace litertp
 	{
 		rtp_session* p = (rtp_session*)ctx;
 		p->on_frame.invoke(mid,ssrc, pt, frequency, channels, frame);
+	}
+
+	void rtp_session::s_litertp_on_dtmf(void* ctx, const char* mid, uint32_t ssrc, uint8_t event, uint32_t duration_ms)
+	{
+		rtp_session* p = (rtp_session*)ctx;
+		p->on_dtmf.invoke(mid, ssrc, event, duration_ms);
 	}
 
 	void rtp_session::s_litertp_on_received_require_keyframe(void* ctx, uint32_t ssrc, int mode)

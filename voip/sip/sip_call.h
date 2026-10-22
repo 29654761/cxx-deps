@@ -57,6 +57,9 @@ namespace voip
 		private:
 			bool add_audio_channel_g711();
 			bool add_audio_channel_g711(uint32_t ssrc, int rtp_port, int rtcp_port);
+			// 在音频流上声明 telephone-event（RFC 4733 按键事件）。
+			// remote_offer 为对端 offer（作为应答方时传入，沿用其 PT；对端没带则不声明），发起方传 nullptr 使用 101/8000。
+			bool add_telephone_event(const litertp::sdp* remote_offer);
 			bool add_video_channel_h264();
 			bool add_video_channel_h264(uint32_t ssrc, int rtp_port, int rtcp_port);
 			bool add_video_channel_h265();

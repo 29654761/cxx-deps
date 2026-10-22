@@ -60,6 +60,10 @@ namespace voip
 		typedef std::function<void(voip::call_ptr call, const std::string& local_alias, const std::string& remote_alias,const std::string& called_alias,
 			const std::string& remote_addr, int remote_port,bool reg)> on_incoming_call_t;
 		typedef std::function<void(call_ptr, bool, bool)> on_presentation_role_changed_t;
+		// 收到对端电话按键（DTMF）。digit 取值 '0'-'9'、'*'、'#'、'A'-'D'；duration_ms 为按键时长(毫秒)，来源不提供时为 0。
+		// SIP 的 RFC 4733 RTP 事件、SIP INFO，以及 H.323 的 UserInputIndication 都汇总到这里。
+		// 注意：回调在 RTP 接收线程或信令线程上执行，不要在回调里做耗时操作。
+		typedef std::function<void(call_ptr, char digit, int duration_ms)> on_dtmf_t;
 
 		call(const std::string& local_alias,const std::string& remote_alias, direction_t direction,
 			const std::string& nat_address, int port,litertp::port_range_ptr rtp_ports);
@@ -86,6 +90,7 @@ namespace voip
 		void set_on_frame(on_frame_t handler) { on_frame = handler; }
 		void set_on_hangup(on_hangup_t handler) { on_hangup = handler; }
 		void set_on_presentation_role_changed(on_presentation_role_changed_t handler) { on_presentation_role_changed = handler; }
+		void set_on_dtmf(on_dtmf_t handler) { on_dtmf = handler; }
 
 		bool send_video_frame(const uint8_t* frame, uint32_t size, uint32_t duration,bool is_extend);
 		bool send_audio_frame(const uint8_t* frame, uint32_t size, uint32_t duration);
@@ -97,15 +102,21 @@ namespace voip
 		call_type_t call_type()const { return call_type_; }
 
 		void use_rtp_address(bool use) { use_rtp_address_ = use; }
+
+		// RFC 4733 事件码转按键字符：0-9 -> '0'-'9'，10 -> '*'，11 -> '#'，12-15 -> 'A'-'D'；其他（如 16=Flash）返回 0
+		static char dtmf_event_to_digit(uint8_t event);
 	protected:
 		void set_on_destroy(on_destroy_t handler) { on_destroy = handler; }
 		void set_on_incoming_call(on_incoming_call_t handler) { on_incoming_call = handler; }
 
 		void invoke_connected();
 		void invoke_hangup(reason_code_t reason);
+		// 统一的按键出口：过滤非法字符后回调 on_dtmf
+		void invoke_dtmf(char digit, int duration_ms);
 	private:
 		static void s_litertp_on_frame(void* ctx, const char* mid, uint32_t ssrc, uint16_t pt, int frequency, int channels, const av_frame_t* frame);
 		static void s_litertp_on_received_require_keyframe(void* ctx, uint32_t ssrc, int mode);
+		static void s_litertp_on_dtmf(void* ctx, const char* mid, uint32_t ssrc, uint8_t event, uint32_t duration_ms);
 
 	protected:
 		on_ringing_t on_remote_ringing;
@@ -118,6 +129,7 @@ namespace voip
 		on_connected_t on_connected;
 		on_incoming_call_t on_incoming_call;
 		on_presentation_role_changed_t on_presentation_role_changed;
+		on_dtmf_t on_dtmf;
 
 		int auto_keyframe_interval_ = 5;
 		mutable std::recursive_mutex mutex_;

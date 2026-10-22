@@ -25,6 +25,7 @@
 #include "receivers/receiver_video_vp8.h"
 #include "receivers/receiver_ps.h"
 #include "receivers/receiver_rtx.h"
+#include "receivers/receiver_telephone_event.h"
 
 #include "proto/rtp_source.h"
 #include "sdp/fmtp.h"
@@ -1016,7 +1017,8 @@ namespace litertp
 				auto receivers = get_receivers();
 				for (auto receiver : receivers)
 				{
-					if (receiver->format().codec == codec_type_rtx)
+					// 按键事件和音频同 SSRC，不单独出接收报告块，否则同一 SSRC 会有两份丢包统计
+					if (receiver->format().codec == codec_type_rtx || receiver->format().codec == codec_type_telephone_event)
 					{
 						continue;
 					}
@@ -1039,7 +1041,7 @@ namespace litertp
 			auto receivers = get_receivers();
 			for (auto receiver : receivers)
 			{
-				if (receiver->format().codec == codec_type_rtx)
+				if (receiver->format().codec == codec_type_rtx || receiver->format().codec == codec_type_telephone_event)
 				{
 					continue;
 				}
@@ -1658,6 +1660,7 @@ namespace litertp
 			receiver->rtp_frame_event_.add(s_rtp_frame_event, this);
 			receiver->rtp_nack_event_.add(s_rtp_nack_event, this);
 			receiver->rtp_keyframe_event_.add(s_rtp_keyframe_event, this);
+			receiver->rtp_dtmf_event_.add(s_rtp_dtmf_event, this);
 			if (!receiver->start())
 				return nullptr;
 			receivers_.insert(std::make_pair(pt, receiver));
@@ -1721,6 +1724,11 @@ namespace litertp
 		else if (fmt.codec == codec_type_opus|| fmt.codec == codec_type_pcma || fmt.codec == codec_type_pcmu|| fmt.codec == codec_type_g722)
 		{
 			return std::make_shared <receiver_audio>(ssrc, media_type_audio, fmt);
+		}
+		else if (fmt.codec == codec_type_telephone_event)
+		{
+			// RFC 4733 电话按键事件，和音频同一路 RTP，按 PT 区分
+			return std::make_shared <receiver_telephone_event>(ssrc, media_type_audio, fmt);
 		}
 		else if (fmt.codec == codec_type_rtx)
 		{
@@ -1790,7 +1798,8 @@ namespace litertp
 			return;
 		}
 
-		if (receiver->format().codec != codec_type_rtx)
+		// 按键事件包不参与远端地址/SSRC 修正，避免个别终端用独立 SSRC 发按键时把音频 SSRC 改乱
+		if (receiver->format().codec != codec_type_rtx && receiver->format().codec != codec_type_telephone_event)
 		{
 			if (p->use_rtp_addr_) {
 				p->set_remote_rtp_endpoint(addr, addr_size, 1);
@@ -2179,6 +2188,19 @@ namespace litertp
 	{
 		std::string media_id=mid();
 		on_frame_received.invoke(media_id.c_str(), ssrc, fmt.pt, fmt.frequency, fmt.channels, &frame);
+	}
+
+
+	void media_stream::s_rtp_dtmf_event(void* ctx, uint32_t ssrc, const sdp_format& fmt, uint8_t event, uint32_t duration_ms)
+	{
+		media_stream* p = (media_stream*)ctx;
+		p->on_rtp_dtmf_event(ssrc, fmt, event, duration_ms);
+	}
+	void media_stream::on_rtp_dtmf_event(uint32_t ssrc, const sdp_format& fmt, uint8_t event, uint32_t duration_ms)
+	{
+		LOGD("received dtmf event=%u duration=%ums\n", (unsigned)event, duration_ms);
+		std::string media_id = mid();
+		on_dtmf_received.invoke(media_id.c_str(), ssrc, event, duration_ms);
 	}
 
 
