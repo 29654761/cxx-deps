@@ -30,6 +30,8 @@ namespace rtpx {
 		typedef std::function<void(const std::string&)> data_channel_opened_handler;
 		typedef std::function<void(const std::string&)> data_channel_closed_handler;
 		typedef std::function<void(const std::string&, const std::vector<uint8_t>&)> data_channel_message_handler;
+		// mid, sid, tid, event (0-9=digits 10=* 11=# 12-15=A-D 16=flash), duration_ms
+		typedef std::function<void(const std::string&, const std::string&, const std::string&, uint8_t, uint32_t)> dtmf_handler;
 
 		rtp_session(asio::io_context& ioc, spdlogger_ptr log,bool stun=true,bool is_port_mux=false);
 		~rtp_session();
@@ -141,6 +143,7 @@ namespace rtpx {
 		data_channel_opened_handler on_data_channel_opened;
 		data_channel_closed_handler on_data_channel_closed;
 		data_channel_message_handler on_data_channel_message;
+		dtmf_handler on_dtmf;
 	};
 	
 }

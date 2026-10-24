@@ -63,6 +63,7 @@ namespace rtpx
 		on_frame.clear();
 		on_nack.clear();
 		on_keyframe.clear();
+		on_dtmf.clear();
 	}
 
 	void receiver::set_max_nack_count(int num)

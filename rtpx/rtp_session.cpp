@@ -436,6 +436,10 @@ namespace rtpx {
 		{
 			ms->on_send_require_keyframe = on_send_require_keyframe;
 		}
+		ms->on_dtmf = [self](const std::string& mid, const std::string& sid, const std::string& tid, uint8_t event, uint32_t duration_ms) {
+			if (self->on_dtmf)
+				self->on_dtmf(mid, sid, tid, event, duration_ms);
+		};
 
 		
 		media_streams_.push_back(ms);

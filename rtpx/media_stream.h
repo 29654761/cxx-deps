@@ -30,6 +30,8 @@ namespace rtpx {
 		typedef std::function<void(const std::string&, const std::string&, const std::string&, const sdp_format&, const av_frame_t&)> frame_handler;
 		typedef std::function<void(const std::string&)> send_require_keyframe_handler;
 		typedef std::function<void(const std::string&)> receive_require_keyframe_handler;
+		// mid, sid, tid, event (0-9=digits 10=* 11=# 12-15=A-D 16=flash), duration_ms
+		typedef std::function<void(const std::string&, const std::string&, const std::string&, uint8_t, uint32_t)> dtmf_handler;
 
 		media_stream(asio::io_context& ioc,media_type_t mt, rtp_trans_mode_t trans_mode,transport_ptr rtp,transport_ptr rtcp,spdlogger_ptr log);
 		~media_stream();
@@ -253,6 +255,7 @@ namespace rtpx {
 		frame_handler on_frame;
 		send_require_keyframe_handler on_send_require_keyframe;
 		receive_require_keyframe_handler on_receive_require_keyframe;
+		dtmf_handler on_dtmf;
 	};
 	
 }

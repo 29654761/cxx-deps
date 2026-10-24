@@ -43,6 +43,8 @@ namespace rtpx
 		typedef sys::mutex_function<void(uint32_t ssrc, const sdp_format& fmt, const av_frame_t& frame)> frame_handler;
 		typedef sys::mutex_function<void(uint32_t ssrc, const sdp_format& fmt, uint16_t pid, uint16_t bld)> nack_handler;
 		typedef sys::mutex_function<void(uint32_t ssrc, const sdp_format& fmt)> keyframe_handler;
+		// event: 0-9=digits, 10=*, 11=#, 12-15=A-D, 16=flash; duration_ms: key press duration in milliseconds
+		typedef sys::mutex_function<void(uint32_t ssrc, const sdp_format& fmt, uint8_t event, uint32_t duration_ms)> dtmf_handler;
 
 		receiver(asio::io_context& ioc,int32_t ssrc,media_type_t mt,const sdp_format& fmt, spdlogger_ptr log);
 		virtual ~receiver();
@@ -103,6 +105,8 @@ namespace rtpx
 		frame_handler on_frame;
 		nack_handler on_nack;
 		keyframe_handler on_keyframe;
+		// Only fired by receiver_telephone_event
+		dtmf_handler on_dtmf;
 	protected:
 		asio::io_context& ioc_;
 		spdlogger_ptr log_;

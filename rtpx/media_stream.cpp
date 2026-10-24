@@ -27,6 +27,7 @@
 #include "receivers/receiver_video_av1.h"
 #include "receivers/receiver_ps.h"
 #include "receivers/receiver_rtx.h"
+#include "receivers/receiver_telephone_event.h"
 
 
 namespace rtpx {
@@ -1131,6 +1132,9 @@ namespace rtpx {
 				auto rs = receivers();
 				for (auto r : rs)
 				{
+					// telephone-event shares SSRC with audio; skip to avoid duplicate loss stats
+					if (r->format().codec == codec_type_telephone_event)
+						continue;
 					rtcp_report rp;
 					r->prepare_rr(rp);
 					rtcp_sr_add_report(&sr, &rp);
@@ -1150,6 +1154,9 @@ namespace rtpx {
 			auto rs = receivers();
 			for (auto r : rs)
 			{
+				// telephone-event shares SSRC with audio; skip to avoid duplicate loss stats
+				if (r->format().codec == codec_type_telephone_event)
+					continue;
 				rtcp_rr* rr = rtcp_rr_create();
 				rr->ssrc = r->ssrc();
 				rtcp_rr_init(rr);
@@ -1463,6 +1470,10 @@ namespace rtpx {
 		{
 			receiver = std::make_shared <receiver_audio>(ioc_, ssrc, media_type_audio, fmt, log_);
 		}
+		else if (fmt.codec == codec_type_telephone_event)
+		{
+			receiver = std::make_shared<receiver_telephone_event>(ioc_, ssrc, media_type_audio, fmt, log_);
+		}
 		else if (fmt.codec == codec_type_rtx)
 		{
 			uint8_t apt = fmt.fmtp.apt();
@@ -1496,6 +1507,11 @@ namespace rtpx {
 
 		receiver->on_nack.set([self](uint32_t ssrc, const sdp_format& fmt, uint16_t pid, uint16_t bld) {
 			self->send_rtcp_nack(self->local_rtp_ssrc_, ssrc, pid, bld);
+		});
+
+		receiver->on_dtmf.set([self](uint32_t ssrc, const sdp_format& fmt, uint8_t event, uint32_t duration_ms) {
+			if (self->on_dtmf)
+				self->on_dtmf(self->mid(), self->msid_sid(), self->msid_tid(), event, duration_ms);
 		});
 		if (!receiver->start()) {
 			return nullptr;
@@ -1631,7 +1647,7 @@ namespace rtpx {
 			return false;
 		}
 
-		if (receiver->format().codec != codec_type_rtx)
+		if (receiver->format().codec != codec_type_rtx && receiver->format().codec != codec_type_telephone_event)
 		{
 			if (use_rtp_endpoint_) {
 				set_remote_rtp_endpoint(endpoint, candidate::make_priority(CANDIDATE_TYPE_HOST, 0xFFFF, 1));
