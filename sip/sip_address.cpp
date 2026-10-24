@@ -19,6 +19,26 @@ sip_address::~sip_address()
 void sip_address::parse(const std::string& s)
 {
 	display = "";
+
+	// 不带尖括号的 addr-spec（如 Linphone 发的 "To: sip:ai8001@1.2.3.4"）：整串是 URI，
+	// 没有显示名；分号后的 tag 等是头部参数（RFC 3261 20.10），由下面 else 分支从 url.queries 挪到 queries
+	if (s.find('<') == std::string::npos && s.find('\"') == std::string::npos)
+	{
+		std::string suri = s;
+		sys::string_util::trim(suri);
+		this->url.parse(suri);
+		queries.clear();
+		for (auto itr = url.queries.begin(); itr != url.queries.end(); itr++)
+		{
+			query_item_t item;
+			item.name = itr->name;
+			item.value = itr->value;
+			queries.push_back(item);
+		}
+		url.queries.clear();
+		return;
+	}
+
 	int i = 0;
 	bool display_begin = false;
 	bool display_end = false;

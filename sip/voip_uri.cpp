@@ -45,7 +45,16 @@ void voip_uri::parse_host(const std::string& host)
 	}
 
 	auto ss=sys::string_util::split(name_host_port, "@", 2,false);
-	if (ss.size() >= 2) {
+	if (ss.size() >= 2 && !ss[1].empty() && ss[1][0] == '[') {
+		// IPv6 主机写作 [addr]:port，地址里的冒号不能当端口分隔符；host 保留方括号，to_string 原样输出
+		this->username = ss[0];
+		auto end = ss[1].find(']');
+		this->host = ss[1].substr(0, end == std::string::npos ? std::string::npos : end + 1);
+		if (end != std::string::npos && end + 1 < ss[1].size() && ss[1][end + 1] == ':') {
+			this->port = strtol(ss[1].c_str() + end + 2, &endptr, 10);
+		}
+	}
+	else if (ss.size() >= 2) {
 		this->username = ss[0];
 		auto ss2 = sys::string_util::split(ss[1], ":", 2);
 		if (ss2.size() > 0)
