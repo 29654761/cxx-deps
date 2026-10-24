@@ -39,6 +39,9 @@ namespace litertp
 	typedef void(*rtp_frame_event)(void* ctx, uint32_t ssrc,const sdp_format& fmt, const av_frame_t& frame);
 	typedef void(*rtp_nack_event)(void* ctx, uint32_t ssrc, const sdp_format& fmt,uint16_t pid,uint16_t bld);
 	typedef void(*rtp_keyframe_event)(void* ctx, uint32_t ssrc, const sdp_format& fmt);
+	// 收到一次完整的电话按键（RFC 4733 telephone-event）
+	// event: 事件码 0-9、10=*、11=#、12-15=A-D、16=Flash；duration_ms: 按键持续时长(毫秒)
+	typedef void(*rtp_dtmf_event)(void* ctx, uint32_t ssrc, const sdp_format& fmt, uint8_t event, uint32_t duration_ms);
 
 
 	class receiver
@@ -99,6 +102,8 @@ namespace litertp
 		sys::callback<rtp_frame_event> rtp_frame_event_;
 		sys::callback<rtp_nack_event> rtp_nack_event_;
 		sys::callback<rtp_keyframe_event> rtp_keyframe_event_;
+		// 只有 receiver_telephone_event 会触发
+		sys::callback<rtp_dtmf_event> rtp_dtmf_event_;
 
 		void invoke_rtp_frame(av_frame_t& frame);
 	protected:

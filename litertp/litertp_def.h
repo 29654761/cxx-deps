@@ -130,6 +130,13 @@ extern "C" {
 
 	typedef void (*litertp_on_frame_t)(void* ctx,const char* mid, uint32_t ssrc, uint16_t pt, int frequency, int channels, const av_frame_t* frame);
 	
+	/*
+	* @brief Called when a complete DTMF key press (RFC 4733 telephone-event) is received.
+	* @param event - 0-9 digits, 10 is '*', 11 is '#', 12-15 is 'A'-'D', 16 is flash.
+	* @param duration_ms - Duration of the key press in milliseconds.
+	*/
+	typedef void (*litertp_on_dtmf_t)(void* ctx, const char* mid, uint32_t ssrc, uint8_t event, uint32_t duration_ms);
+
 	//received rtcp fir or pli
 	typedef void (*litertp_on_received_require_keyframe_t)(void* ctx, uint32_t ssrc, int mode);
 

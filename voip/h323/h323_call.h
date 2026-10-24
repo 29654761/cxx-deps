@@ -203,6 +203,8 @@ namespace voip
 			void on_miscellaneous_indication(const H245_MiscellaneousIndication& body);
 			void on_flow_control_indication(const H245_FlowControlIndication& body);
 			void on_conference_indication(const H245_ConferenceIndication& body);
+			// H.245 UserInputIndication（按键），转给 call::invoke_dtmf
+			void on_user_input_indication(const H245_UserInputIndication& body);
 
 			void on_h239_message(unsigned sub_message, const H245_ArrayOf_GenericParameter& params);
 			void on_h239_flow_control_release_request(unsigned logical_channel,unsigned bit_rate);

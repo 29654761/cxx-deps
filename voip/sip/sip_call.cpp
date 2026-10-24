@@ -57,6 +57,49 @@ namespace voip
 			return true;
 		}
 
+		bool sip_call::add_telephone_event(const litertp::sdp* remote_offer)
+		{
+			auto ms = rtp_.get_media_stream(media_type_audio);
+			if (!ms)
+			{
+				return false;
+			}
+
+			// 默认 101/8000；作为应答方时沿用对端 offer 里的 PT 和采样率，
+			// 保证两边对同一个 PT 的理解一致（对端可能用 96、100 等动态 PT）。
+			int pt = 101;
+			int frequency = 8000;
+			bool found = false;
+			if (remote_offer)
+			{
+				for (auto itr = remote_offer->medias.begin(); itr != remote_offer->medias.end() && !found; itr++)
+				{
+					if (itr->media_type != media_type_audio)
+						continue;
+					for (auto fmt = itr->rtpmap.begin(); fmt != itr->rtpmap.end(); fmt++)
+					{
+						if (fmt->second.codec != codec_type_telephone_event)
+							continue;
+						pt = fmt->second.pt;
+						frequency = fmt->second.frequency;
+						found = true;
+						// 音频是 G.711，优先选 8000 采样率的 telephone-event
+						if (frequency == 8000)
+							break;
+					}
+				}
+				if (!found)
+				{
+					// 对端没带 telephone-event，不声明（对端只能走 SIP INFO 或带内音频发按键）
+					return false;
+				}
+			}
+
+			// 作为本地轨道加入，协商（negotiate）时才会保留在远端 rtpmap 里，
+			// 收到该 PT 的 RTP 包时 litertp 才会交给 receiver_telephone_event 解析。
+			return ms->add_local_audio_track(codec_type_telephone_event, (uint8_t)pt, frequency);
+		}
+
 		bool sip_call::add_video_channel_h264()
 		{
 			std::string mid = video_mid_;
@@ -364,6 +407,7 @@ namespace voip
 				return false;
 			}
 			rtp_.set_remote_sdp(remote_sdp,sdp_type_offer);
+			add_telephone_event(&remote_sdp);
 			auto sdp=rtp_.create_answer();
 			sdp.bundle = false;
 			/*
@@ -520,6 +564,7 @@ namespace voip
 				}
 				return;
 			}
+			add_telephone_event(&sdp);
 
 			litertp::sdp answer=rtp_.create_answer();
 			answer.bundle = false;
@@ -532,15 +577,6 @@ namespace voip
 				{
 					itr->b.push_back("AS:" + std::to_string(max_bitrate_));
 					//itr->b.push_back("TIAS:" + std::to_string((uint32_t)(max_bitrate_ * 1000)));
-				}
-				else if (itr->media_type == media_type_audio)
-				{
-					litertp::sdp_format fmt;
-					fmt.pt = 101;
-					fmt.codec = codec_type_telephone_event;
-					fmt.codec_text = litertp::sdp_format::convert_codec_text(fmt.codec);
-					fmt.frequency = 8000;
-					itr->rtpmap.insert(std::make_pair(fmt.pt, fmt));
 				}
 				itr->setup = stp_setup_none;
 				itr->protos.erase("UDP");
@@ -600,6 +636,64 @@ namespace voip
 			}
 		}
 
+		// 解析 SIP INFO 里的按键，支持两种常见格式：
+		//   Content-Type: application/dtmf-relay   正文 "Signal=5\r\nDuration=160\r\n"（Duration 单位毫秒）
+		//   Content-Type: application/dtmf         正文 "5"
+		// Signal 一般是按键字符本身，个别设备用 RFC 4733 事件码（10=*、11=#、12-15=A-D），两种都兼容。
+		static bool parse_info_dtmf(const std::string& content_type, const std::string& body, char& digit, int& duration_ms)
+		{
+			// 去掉 Content-Type 里的参数（如 ;charset=utf-8）
+			std::string ct = content_type.substr(0, content_type.find(';'));
+			sys::string_util::trim(ct);
+
+			std::string signal;
+			duration_ms = 0;
+			if (sys::string_util::icasecompare(ct, "application/dtmf-relay"))
+			{
+				auto lines = sys::string_util::split(body, "\n");
+				for (auto line : lines)
+				{
+					size_t pos = line.find('=');
+					if (pos == std::string::npos)
+						continue;
+					std::string key = line.substr(0, pos);
+					std::string val = line.substr(pos + 1);
+					sys::string_util::trim(key);
+					sys::string_util::trim(val);
+					if (sys::string_util::icasecompare(key, "Signal"))
+					{
+						signal = val;
+					}
+					else if (sys::string_util::icasecompare(key, "Duration"))
+					{
+						duration_ms = atoi(val.c_str());
+					}
+				}
+			}
+			else if (sys::string_util::icasecompare(ct, "application/dtmf"))
+			{
+				signal = body;
+				sys::string_util::trim(signal);
+			}
+			else
+			{
+				return false;
+			}
+
+			if (signal.size() == 1)
+			{
+				digit = signal[0];
+				return true;
+			}
+			if (signal.size() == 2 && isdigit((unsigned char)signal[0]) && isdigit((unsigned char)signal[1]))
+			{
+				// 事件码形式 "10"~"15"
+				digit = call::dtmf_event_to_digit((uint8_t)atoi(signal.c_str()));
+				return digit != 0;
+			}
+			return false;
+		}
+
 		void sip_call::on_info(const sip_message& msg)
 		{
 			auto con = get_con();
@@ -613,6 +707,14 @@ namespace voip
 					rsp.headers.add("Record-Route", *itr);
 				}
 				con->send_message(rsp);
+			}
+
+			// 对端通过 SIP INFO 发送的按键（未协商 telephone-event 时常见）
+			char digit = 0;
+			int duration_ms = 0;
+			if (parse_info_dtmf(msg.content_type(), msg.body, digit, duration_ms))
+			{
+				invoke_dtmf(digit, duration_ms);
 			}
 		}
 
@@ -785,6 +887,8 @@ namespace voip
 			req.set_call_id(call_id_);
 			req.set_content_type("application/sdp");
 
+			// telephone-event 作为本地轨道声明（101/8000），对端应答后协商结果里保留它，按键 RTP 包才能被识别
+			add_telephone_event(nullptr);
 			litertp::sdp sdp = rtp_.create_offer();
 			sdp.bundle = false;
 			sdp.o = "srtc 2371158016 0 IN IP4 "+ nat_address_;
@@ -796,15 +900,6 @@ namespace voip
 				{
 					itr->b.push_back("AS:" + std::to_string(max_bitrate_));
 					//itr->b.push_back("TIAS:" + std::to_string((uint32_t)(max_bitrate_ * 1000)));
-				}
-				else if(itr->media_type== media_type_audio)
-				{
-					litertp::sdp_format fmt;
-					fmt.pt = 101;
-					fmt.codec = codec_type_telephone_event;
-					fmt.codec_text = litertp::sdp_format::convert_codec_text(fmt.codec);
-					fmt.frequency = 8000;
-					itr->rtpmap.insert(std::make_pair(fmt.pt, fmt));
 				}
 				itr->setup = stp_setup_none;
 				itr->protos.erase("UDP");

@@ -67,6 +67,7 @@ namespace litertp
 
 		static void s_litertp_on_frame(void* ctx,const char* mid, uint32_t ssrc, uint16_t pt, int frequency, int channels, const av_frame_t* frame);
 		static void s_litertp_on_received_require_keyframe(void* ctx, uint32_t ssrc, int mode);
+		static void s_litertp_on_dtmf(void* ctx, const char* mid, uint32_t ssrc, uint8_t event, uint32_t duration_ms);
 		static void s_transport_connected(void* ctx, int port);
 		static void s_transport_disconnected(void* ctx, int port);
 		static void s_litertp_on_app_data(void* ctx, const char* mid, const uint8_t* data, size_t size);
@@ -81,6 +82,8 @@ namespace litertp
 	public:
 		sys::callback<litertp_on_frame_t> on_frame;
 		sys::callback<litertp_on_received_require_keyframe_t> on_received_require_keyframe;
+		// 收到一次完整的电话按键（RFC 4733 telephone-event）
+		sys::callback<litertp_on_dtmf_t> on_dtmf;
 		sys::callback<litertp_on_connected_t> on_connected;
 		sys::callback<litertp_on_disconnected_t> on_disconnected;
 

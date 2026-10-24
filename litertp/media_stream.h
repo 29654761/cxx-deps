@@ -170,6 +170,9 @@ namespace litertp
 
 		static void s_rtp_nack_event(void* ctx, uint32_t ssrc, const sdp_format& fmt, uint16_t pid, uint16_t bld);
 
+		static void s_rtp_dtmf_event(void* ctx, uint32_t ssrc, const sdp_format& fmt, uint8_t event, uint32_t duration_ms);
+		void on_rtp_dtmf_event(uint32_t ssrc, const sdp_format& fmt, uint8_t event, uint32_t duration_ms);
+
 		void on_rtp_nack_event(uint32_t ssrc, const sdp_format& fmt, uint16_t pid, uint16_t bld);
 
 		static void s_rtp_keyframe_event(void* ctx, uint32_t ssrc, const sdp_format& fmt);
@@ -217,6 +220,8 @@ namespace litertp
 		sys::callback<litertp_on_frame_t> on_frame_received;
 		sys::callback<litertp_on_received_require_keyframe_t> on_received_require_keyframe;
 		sys::callback<litertp_on_require_keyframe_t> on_require_keyframe;
+		// 收到一次完整的电话按键（RFC 4733 telephone-event，需在 SDP 中协商）
+		sys::callback<litertp_on_dtmf_t> on_dtmf_received;
 
 		sys::callback<litertp_on_data_channel_open_t> on_data_channel_open;
 		sys::callback<litertp_on_data_channel_close_t> on_data_channel_close;

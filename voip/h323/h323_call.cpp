@@ -2366,6 +2366,11 @@ namespace voip
 					const H245_ConferenceIndication& body = (const H245_ConferenceIndication&)ind;
 					on_conference_indication(body);
 				}
+				else if (ind.GetTag() == H245_IndicationMessage::e_userInput)
+				{
+					const H245_UserInputIndication& body = (const H245_UserInputIndication&)ind;
+					on_user_input_indication(body);
+				}
 			}
 		}
 
@@ -3280,6 +3285,36 @@ namespace voip
 				const H245_TerminalLabel& label = (const H245_TerminalLabel&)body;
 				mcu_number_ = label.m_mcuNumber;
 				terminal_number_ = label.m_terminalNumber;
+			}
+		}
+
+		void h323_call::on_user_input_indication(const H245_UserInputIndication& body)
+		{
+			// H.245 按键，对应本端在能力集里声明的 basicString / dtmf 两种 UserInput 能力：
+			//   alphanumeric: 按键字符串（一次可能带多个按键，无时长）
+			//   signal:       单个按键 + 可选时长(毫秒)
+			if (body.GetTag() == H245_UserInputIndication::e_alphanumeric)
+			{
+				const PASN_GeneralString& str = (const PASN_GeneralString&)body;
+				PString value = str.GetValue();
+				for (PINDEX i = 0; i < value.GetLength(); i++)
+				{
+					invoke_dtmf(value[i], 0);
+				}
+			}
+			else if (body.GetTag() == H245_UserInputIndication::e_signal)
+			{
+				const H245_UserInputIndication_signal& sig = (const H245_UserInputIndication_signal&)body;
+				PString value = sig.m_signalType.GetValue();
+				if (!value.IsEmpty())
+				{
+					int duration_ms = 0;
+					if (sig.HasOptionalField(H245_UserInputIndication_signal::e_duration))
+					{
+						duration_ms = (int)sig.m_duration.GetValue();
+					}
+					invoke_dtmf(value[0], duration_ms);
+				}
 			}
 		}
 
