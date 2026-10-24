@@ -111,8 +111,12 @@ bool rtc_client::leave_channel()
 
 bool rtc_client::subscribe_by_desc(const char* uid, const char* tdesc)
 {
+	// 不持 mutex_：调用方（subscribe_track / unsubscribe_track）已在锁外调用，见 subscribe_track 注释
+	void* h = handle();
+	if (!h)
+		return false;
 	rtc_user_info_t user = {};
-	int r = rtc_get_user_info(handle_, uid, &user);
+	int r = rtc_get_user_info(h, uid, &user);
 	if (r != RTC_OK)
 	{
 		if (log_)
@@ -127,7 +131,7 @@ bool rtc_client::subscribe_by_desc(const char* uid, const char* tdesc)
 		{
 			if (user.stream_tracks[i].kind == 0)
 			{
-				int r = rtc_subscribe_audio(handle_, uid, user.stream_tracks[i].track_id);
+				int r = rtc_subscribe_audio(h, uid, user.stream_tracks[i].track_id);
 				if (log_)
 				{
 					if (r != RTC_OK)
@@ -144,7 +148,7 @@ bool rtc_client::subscribe_by_desc(const char* uid, const char* tdesc)
 			}
 			else if (user.stream_tracks[i].kind == 1)
 			{
-				int r = rtc_subscribe_video(handle_, uid, user.stream_tracks[i].track_id);
+				int r = rtc_subscribe_video(h, uid, user.stream_tracks[i].track_id);
 				if (log_)
 				{
 					if (r != RTC_OK)
@@ -176,8 +180,12 @@ bool rtc_client::subscribe_by_desc(const char* uid, const char* tdesc)
 
 bool rtc_client::unsubscribe_by_desc(const char* uid, const char* tdesc)
 {
+	// 不持 mutex_：调用方（subscribe_track / unsubscribe_track）已在锁外调用，见 subscribe_track 注释
+	void* h = handle();
+	if (!h)
+		return false;
 	rtc_user_info_t user = {};
-	int r = rtc_get_user_info(handle_, uid, &user);
+	int r = rtc_get_user_info(h, uid, &user);
 	if (r != RTC_OK)
 		return false;
 
@@ -185,7 +193,7 @@ bool rtc_client::unsubscribe_by_desc(const char* uid, const char* tdesc)
 	{
 		if (strcmp(user.stream_tracks[i].desc, tdesc) == 0)
 		{
-			int r=rtc_unsubscribe(handle_, uid, user.stream_tracks[i].track_id);
+			int r=rtc_unsubscribe(h, uid, user.stream_tracks[i].track_id);
 			rtc_free_user_info(&user);
 			return r == RTC_OK;
 		}
@@ -246,20 +254,24 @@ void rtc_client::set_all_subscribe_result(bool result)
 
 bool rtc_client::subscribe_track(const subscribe_item& item)
 {
-	std::lock_guard<std::mutex> lock(mutex_);
-	if (!handle_)
+	// 不能持 mutex_ 调 rtc_subscribe_*：它是同步接口，服务端回 not found 时 rtc-go 会原地退避重试
+	// （1s/2s/4s，约 7 秒）。原先全程持锁，期间「已连接」回调里的 set_all_subscribe_result 拿不到锁，
+	// 设备层收不到 connected、迟迟不接听来电（实测 SIP 呼入多响铃约 8 秒）。
+	// 锁只用来取句柄；句柄被 close() 并发销毁也安全：rtc-go 按句柄查表，销毁后调用返回 RTC_INVALID_PARAM
+	void* h = handle();
+	if (!h)
 		return false;
 
 	switch (item.track_type)
 	{
 	case track_type_t::tid_audio:
 	{
-		int r=rtc_subscribe_audio(handle_, item.uid.c_str(), item.track.c_str());
+		int r=rtc_subscribe_audio(h, item.uid.c_str(), item.track.c_str());
 		return r == RTC_OK;
 	}
 	case track_type_t::tid_video:
 	{
-		int r = rtc_subscribe_video(handle_, item.uid.c_str(), item.track.c_str());
+		int r = rtc_subscribe_video(h, item.uid.c_str(), item.track.c_str());
 		return r == RTC_OK;
 	}
 	case track_type_t::tdesc:
@@ -274,8 +286,9 @@ bool rtc_client::subscribe_track(const subscribe_item& item)
 
 bool rtc_client::unsubscribe_track(const subscribe_item& item)
 {
-	std::lock_guard<std::mutex> lock(mutex_);
-	if (!handle_)
+	// 同 subscribe_track：锁只用来取句柄，不持锁调可能阻塞的 SDK 接口
+	void* h = handle();
+	if (!h)
 		return false;
 
 	switch (item.track_type)
@@ -283,7 +296,7 @@ bool rtc_client::unsubscribe_track(const subscribe_item& item)
 	case track_type_t::tid_audio:
 	case track_type_t::tid_video:
 	{
-		int r = rtc_unsubscribe(handle_,item.uid.c_str(), item.track.c_str());
+		int r = rtc_unsubscribe(h,item.uid.c_str(), item.track.c_str());
 		return r == RTC_OK;
 	}
 	case track_type_t::tdesc:
