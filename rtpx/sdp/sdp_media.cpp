@@ -69,6 +69,24 @@ namespace rtpx {
 			if (ss.size() >= 4) {
 				app_data_type = ss[3];
 			}
+			// RFC 4583：BFCP 的 fmt 固定为 "*"，应用协议由 proto 字段（UDP/BFCP、TCP/BFCP、TCP/TLS/BFCP）标识
+			if (this->protos.find("BFCP") != this->protos.end())
+			{
+				app_data_type = "BFCP";
+			}
+			else if (this->protos.find("RTP") != this->protos.end())
+			{
+				// RTP 承载的应用媒体（如 H.239 的 H.224，"m=application 7684 RTP/AVP 100"）：
+				// fmt 是 payload type，先建默认条目，后续 a=rtpmap 才能写入格式名
+				rtpmap.clear();
+				for (size_t i = 3; i < ss.size(); i++)
+				{
+					uint8_t pt = (uint8_t)strtol(ss[i].c_str(), &endptr, 10);
+					sdp_format fmt;
+					set_default_format(pt, fmt);
+					rtpmap.insert(std::make_pair(fmt.pt, fmt));
+				}
+			}
 		}
 		else
 		{
@@ -230,7 +248,12 @@ namespace rtpx {
 				std::vector<std::string> ss2 = sys::string_util::split(ss[1], "/");
 
 				auto iter = this->rtpmap.find(pt);
-				if (iter != this->rtpmap.end())
+				if (iter == this->rtpmap.end())
+				{
+					// m 行未预填该 pt（application 媒体或 rtpmap 超前于 fmt 列表）时新建条目
+					sdp_format fmt(pt, codec_type_unknown, 0);
+					iter = this->rtpmap.insert(std::make_pair(pt, fmt)).first;
+				}
 				{
 					if (ss2.size() >= 1)
 					{
@@ -469,20 +492,44 @@ namespace rtpx {
 		to_protocols_string(ss);
 		ss << " ";
 
-		if (rtpmap.size() > 0)
+		if (media_type == media_type_application)
 		{
-			for (auto fmt : rtpmap)
+			// RFC 8866 §5.14：application 行的 fmt 有三种形态——
+			// RTP 承载（H.224 等）输出 payload type；datachannel 输出协议名；BFCP（RFC 4583）固定为 "*"
+			if (rtpmap.size() > 0)
 			{
-				ss << (int)fmt.second.pt << " ";
+				for (auto fmt : rtpmap)
+				{
+					ss << (int)fmt.second.pt << " ";
+				}
+				ss.seekp(-1, std::ios_base::end);
 			}
-			ss.seekp(-1, std::ios_base::end);
+			else if (app_data_type == "BFCP")
+			{
+				ss << "*";
+			}
+			else
+			{
+				ss << app_data_type;
+			}
+		}
+		else
+		{
+			if (rtpmap.size() > 0)
+			{
+				for (auto fmt : rtpmap)
+				{
+					ss << (int)fmt.second.pt << " ";
+				}
+				ss.seekp(-1, std::ios_base::end);
+			}
+
+			if (app_data_type.size() > 0)
+			{
+				ss << app_data_type;
+			}
 		}
 
-		if (app_data_type.size() > 0)
-		{
-			ss << app_data_type;
-		}
-		
 
 		ss << "\r\n";
 
@@ -670,26 +717,8 @@ namespace rtpx {
 
 		for (auto& itr : rtpmap)
 		{
-			if (itr.second.codec == fmt_in.codec && itr.second.frequency == fmt_in.frequency)
+			if (itr.second.is_compatible_with(fmt_in))
 			{
-				 if (fmt_in.fmtp.packetization_mode() != itr.second.fmtp.packetization_mode())
-					continue;
-
-
-
-				 uint8_t profile_id1 = fmt_in.fmtp.profile_id();
-				 uint8_t profile_id2 = itr.second.fmtp.profile_id();
-				 if (profile_id1 > 0 && profile_id2 > 0 && profile_id1 != profile_id2)
-					 continue;
-
-
-				if (!fmt_in.fmtp.level_asymmetry_allowed() && !itr.second.fmtp.level_asymmetry_allowed())
-				{
-					if (fmt_in.fmtp.level_id() != itr.second.fmtp.level_id())
-						continue;
-				}
-
-
 				fmt_out.push_back(itr.second);
 
 				sdp_format rtx;

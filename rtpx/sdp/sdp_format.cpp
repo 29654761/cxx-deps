@@ -44,6 +44,32 @@ namespace rtpx
 		return ret;
 	}
 
+	bool sdp_format::is_compatible_with(const sdp_format& other)const
+	{
+		if (codec != other.codec || frequency != other.frequency)
+		{
+			return false;
+		}
+		if (fmtp.packetization_mode() != other.fmtp.packetization_mode())
+		{
+			return false;
+		}
+		uint8_t profile_id1 = fmtp.profile_id();
+		uint8_t profile_id2 = other.fmtp.profile_id();
+		if (profile_id1 > 0 && profile_id2 > 0 && profile_id1 != profile_id2)
+		{
+			return false;
+		}
+		if (!fmtp.level_asymmetry_allowed() && !other.fmtp.level_asymmetry_allowed())
+		{
+			if (fmtp.level_id() != other.fmtp.level_id())
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	void sdp_format::to_string(std::stringstream& ss)const
 	{
 		std::string codec_str = get_codec();

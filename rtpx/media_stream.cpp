@@ -135,6 +135,26 @@ namespace rtpx {
 		return r.second;
 	}
 
+	bool media_stream::add_local_format(const sdp_format& fmt)
+	{
+		std::unique_lock<std::shared_mutex> lk(local_mutex_);
+		if (media_type_ != media_type_audio && media_type_ != media_type_video)
+		{
+			return false;
+		}
+		// 采样率类别校验：音频为实际采样率，视频固定 90000
+		if (media_type_ == media_type_audio && fmt.frequency >= 90000)
+		{
+			return false;
+		}
+		if (media_type_ == media_type_video && fmt.frequency < 90000)
+		{
+			return false;
+		}
+		auto r = local_formats_.insert(std::make_pair(fmt.pt, fmt));
+		return r.second;
+	}
+
 	bool media_stream::add_remote_video_track(codec_type_t codec, uint8_t pt, int frequency, bool rtcp_fb)
 	{
 		std::unique_lock<std::shared_mutex> lk(remote_mutex_);
@@ -304,8 +324,9 @@ namespace rtpx {
 			remote_rtx_ssrc_ = sdp.ssrcs[1].ssrc;
 		}
 		remote_setup_ = sdp.setup;
-		if (remote_setup_ == sdp_setup_none)
+		if (remote_setup_ == sdp_setup_none && (security_ || sdp.is_security()))
 		{
+			// DTLS 场景必须协商 setup；纯 RTP/AVP（如 SIP、H.323、RTSP）的 SDP 通常没有 a=setup，容忍缺失
 			if (log_)
 			{
 				log_->warn("Set remote SDP failed: The remote parties missing setup.mid={},mt={}",
@@ -317,14 +338,18 @@ namespace rtpx {
 		if (type == sdp_type_offer)
 		{
 			sdp_role_ = sdp_type_answer;
-			mid_ = sdp.mid;
+			// 对端未带 mid 时保留流既有的 mid（会话层已按 m 行位置合成）
+			if (!sdp.mid.empty())
+			{
+				mid_ = sdp.mid;
+			}
 			msid_sid_ = sdp.msid_sid;
 			msid_tid_ = sdp.msid_tid;
 			app_proto_ = sdp.app_data_type;
-
-			std::string sctp_port_str=sdp.get_attribute("sctp-port", "0");
-			char* endptr = nullptr;
-			sctp_port_ = (uint16_t)strtol(sctp_port_str.c_str(), &endptr, 10);
+			if (sdp.media_type == media_type_application)
+			{
+				app_protos_ = sdp.protos;
+			}
 
 			if (sdp.setup == sdp_setup_actpass)
 			{
@@ -361,7 +386,31 @@ namespace rtpx {
 			}
 
 			remote_formats_ = sdp.rtpmap;
-			local_formats_ = sdp.rtpmap;
+			{
+				// RFC 3264 §6.1：应答只保留对端 offer 与本端能力集的交集，pt 沿用对端编号。
+				// 未注册能力集时保持旧行为（镜像对端 rtpmap），不影响既有调用方（如 sfu）
+				auto& caps = media_capabilities::global();
+				local_formats_.clear();
+				if (caps.empty())
+				{
+					local_formats_ = sdp.rtpmap;
+				}
+				else
+				{
+					for (auto& itr : sdp.rtpmap)
+					{
+						if (caps.match(media_type_, itr.second))
+						{
+							local_formats_.insert(itr);
+						}
+						else if (log_)
+						{
+							log_->info("Format not supported locally, ignored: mid={},pt={},codec={}",
+								mid_, (int)itr.first, itr.second.get_codec())->flush();
+						}
+					}
+				}
+			}
 
 			if (sdp.ssrcs.size() > 0) {
 				remote_rtp_ssrc_ = sdp.ssrcs[0].ssrc;
@@ -374,6 +423,10 @@ namespace rtpx {
 			{
 				if (sdp.app_data_type == "webrtc-datachannel")
 				{
+					std::string sctp_port_str = sdp.get_attribute("sctp-port", "0");
+					char* endptr = nullptr;
+					sctp_port_ = (uint16_t)strtol(sctp_port_str.c_str(), &endptr, 10);
+
 					rtp_transport_->sctp_set_remote_port(sctp_port_);
 					rtp_transport_->sctp_init(sctp_port_);
 				}
@@ -424,7 +477,7 @@ namespace rtpx {
 				if (!ec)
 				{
 					remote_rtcp_endpoint_priority_ = 0;
-					remote_rtcp_endpoint_ = ep;
+					remote_rtcp_endpoint_ = ep2;
 				}
 			}
 		}
@@ -464,7 +517,8 @@ namespace rtpx {
 			}
 		}
 
-		if (remote_sdp.setup == local_setup_)
+		// setup 只在 DTLS 场景有意义；纯 RTP/AVP 的双方 setup 都缺省时不做校验
+		if ((security_ || remote_sdp.is_security()) && remote_sdp.setup == local_setup_)
 		{
 			if (log_)
 			{
@@ -514,6 +568,7 @@ namespace rtpx {
 		}
 
 		std::vector<sdp_format> rfmts;
+		std::vector<std::pair<uint8_t, sdp_format>> pt_aliases;
 		std::set<uint8_t> not_support_rtx;
 		rfmts.reserve(remote_sdp.rtpmap.size());
 		for (auto itr = local_formats_.begin(); itr != local_formats_.end();)
@@ -532,6 +587,18 @@ namespace rtpx {
 					not_support_rtx.insert(itr->first);
 				}
 
+				// RFC 3264 规定应答沿用 offer 的 payload type 编号，但部分 SIP/GB28181 设备会在应答里
+				// 重新编号（如 offer 96 -> answer 106），实际 RTP 包却仍按 offer 的 pt 发送。
+				// 把本端 pt 也登记为 remote_formats_ 的别名，保证按任一编号发来的包都能匹配到接收器
+				for (const auto& of : ofmts)
+				{
+					if (of.codec != codec_type_rtx && of.pt != itr->first)
+					{
+						sdp_format alias = of;
+						alias.pt = itr->first;
+						pt_aliases.emplace_back(itr->first, alias);
+					}
+				}
 
 				itr++;
 			}
@@ -545,6 +612,12 @@ namespace rtpx {
 		for (const auto& rfmt : rfmts)
 		{
 			remote_formats_.insert(std::make_pair(rfmt.pt, rfmt));
+		}
+
+		// 登记本端 pt 别名（应答重编号场景，见上）
+		for (const auto& alias : pt_aliases)
+		{
+			remote_formats_.insert(std::make_pair(alias.first, alias.second));
 		}
 
 		for (auto itr = local_formats_.begin();itr!=local_formats_.end();)
@@ -613,6 +686,8 @@ namespace rtpx {
 		local_sdp.has_rtp_address = true;
 		local_sdp.has_rtcp = true;
 		local_sdp.rtcp_mux = is_rtcp_mux_;
+		local_sdp.rtp_port = rtp_transport_->local_port();
+		local_sdp.rtcp_port = is_rtcp_mux_ ? local_sdp.rtp_port : rtcp_transport_->local_port();
 		
 		if (media_type_ == media_type_application)
 		{
@@ -629,11 +704,22 @@ namespace rtpx {
 			}
 			else
 			{
+				// RFC 3264 §6：不支持的应用媒体（BFCP、H.224 等）在应答中原位置拒绝——保留 m 行并把端口置 0。
+				// proto 与格式镜像对端的行，便于对端按位置关联
 				if (log_)
 				{
-					log_->error("Generate SDP failed: unknown app proto. mid={},mt={}",mid_,media_type_)->flush();
+					log_->info("Unsupported application media rejected: mid={},proto={}", mid_, app_proto_)->flush();
 				}
-				return false;
+				if (!app_protos_.empty())
+				{
+					local_sdp.protos = app_protos_;
+				}
+				local_sdp.rtp_port = 0;
+				local_sdp.rtcp_port = 0;
+				local_sdp.has_rtp_address = false;
+				local_sdp.has_rtcp = false;
+				local_sdp.setup = sdp_setup_none;
+				return true;
 			}
 
 		}
@@ -745,9 +831,20 @@ namespace rtpx {
 	{
 		asio::ip::udp::endpoint ep;
 		if (!remote_rtcp_endpoint(ep))
+		{
+			if (log_)
+			{
+				log_->warn("Send rtcp packet failed: remote rtcp endpoint unknown, mid={}", mid_)->flush();
+			}
 			return false;
+		}
 
-		return rtcp_transport_->send_rtcp_packet(rtcp_data, size, ep);
+		bool r = rtcp_transport_->send_rtcp_packet(rtcp_data, size, ep);
+		if (!r && log_)
+		{
+			log_->warn("Send rtcp packet failed: mid={},endpoint={}:{}", mid_, ep.address().to_string(), ep.port())->flush();
+		}
+		return r;
 	}
 
 	bool media_stream::send_data_channel(const uint8_t* data, int size)
@@ -761,45 +858,89 @@ namespace rtpx {
 
 	void media_stream::send_rtcp_keyframe(uint32_t ssrc_media)
 	{
+		// ssrc_media 是对端媒体发送方的 SSRC（RFC 4585），未学习到时无法请求
+		if (ssrc_media == 0)
+		{
+			if (log_)
+			{
+				log_->warn("Require keyframe skipped: remote ssrc unknown, mid={}", mid_)->flush();
+			}
+			return;
+		}
 		uint32_t ssrc = local_rtp_ssrc();
 
-		std::shared_lock<std::shared_mutex> lock(remote_mutex_);
-		for (auto itr_fmt = remote_formats_.begin(); itr_fmt != remote_formats_.end(); itr_fmt++)
+		// 只对实际在收流的格式请求关键帧：对端 offer 可能声明多个视频格式，
+		// 未使用的格式不发请求，避免重复/无效的 PLI/FIR
+		std::vector<uint8_t> active_pts;
 		{
-			if (itr_fmt->second.codec == codec_type_rtx) {
-				continue;
+			std::shared_lock<std::shared_mutex> lock(remote_mutex_);
+			for (auto& itr : receivers_)
+			{
+				codec_type_t codec = itr.second->format().codec;
+				if (codec == codec_type_rtx || codec == codec_type_telephone_event)
+				{
+					continue;
+				}
+				active_pts.push_back(itr.first);
 			}
 
-			if (itr_fmt->second.rtcp_fb.find("nack pli") != itr_fmt->second.rtcp_fb.end())
+			// 尚未收到任何 RTP 包（receiver 未建立）时，回退取第一个可用的视频格式
+			if (active_pts.empty())
 			{
-				send_rtcp_keyframe_pli(ssrc, ssrc_media);
+				for (auto& itr : remote_formats_)
+				{
+					codec_type_t codec = itr.second.codec;
+					if (codec == codec_type_rtx || codec == codec_type_telephone_event)
+					{
+						continue;
+					}
+					active_pts.push_back(itr.first);
+					break;
+				}
 			}
-			else if (itr_fmt->second.rtcp_fb.find("ccm fir") != itr_fmt->second.rtcp_fb.end())
-			{
-				send_rtcp_keyframe_fir(ssrc, ssrc_media);
-			}
-			else
-			{
-				send_rtcp_keyframe_pli(ssrc, ssrc_media);
-			}
+		}
+
+		if (active_pts.empty() && log_)
+		{
+			log_->warn("Require keyframe skipped: no available video format, mid={}", mid_)->flush();
+		}
+
+		for (auto pt : active_pts)
+		{
+			send_rtcp_keyframe(ssrc_media, pt);
 		}
 	}
 
 	void media_stream::send_rtcp_keyframe(uint32_t ssrc_media, uint8_t pt)
 	{
+		// ssrc_media 是对端媒体发送方的 SSRC（RFC 4585），未学习到时无法请求
+		if (ssrc_media == 0)
+		{
+			return;
+		}
 		uint32_t ssrc = local_rtp_ssrc();
-
 
 		sdp_format fmt;
 		if (!remote_format(pt, fmt))
+		{
+			if (log_)
+			{
+				log_->warn("Require keyframe skipped: remote format not found, mid={},pt={}", mid_, (int)pt)->flush();
+			}
 			return;
+		}
 
+		if (log_)
+		{
+			log_->debug("Send keyframe request: mid={},pt={},ssrc_media={}", mid_, (int)pt, ssrc_media)->flush();
+		}
 
-		if (fmt.rtcp_fb.find("nack pli") == fmt.rtcp_fb.end())
+		// 协商了 nack pli 用 PLI，其次 ccm fir 用 FIR，都未协商时默认 PLI
+		if (fmt.rtcp_fb.find("nack pli") != fmt.rtcp_fb.end())
 		{
 			send_rtcp_keyframe_pli(ssrc, ssrc_media);
 		}
-		else if (fmt.rtcp_fb.find("ccm fir") == fmt.rtcp_fb.end())
+		else if (fmt.rtcp_fb.find("ccm fir") != fmt.rtcp_fb.end())
 		{
 			send_rtcp_keyframe_fir(ssrc, ssrc_media);
 		}
@@ -1644,6 +1785,10 @@ namespace rtpx {
 		auto receiver = get_receiver(packet->header()->pt);
 		if (!receiver)
 		{
+			if (log_)
+			{
+				log_->warn("No receiver for pt={} ssrc={}", packet->header()->pt, packet->header()->ssrc)->flush();
+			}
 			return false;
 		}
 
@@ -1657,6 +1802,20 @@ namespace rtpx {
 			if (remote_rtp_ssrc() == 0)
 			{
 				set_remote_rtp_ssrc(packet->header()->ssrc);
+			}
+			else if (packet->header()->ssrc != remote_rtp_ssrc())
+			{
+				// RFC 3550 §8.2：对端从未知源变为从已知地址发流（设备重启/重协商换了 SSRC），重新绑定
+				asio::ip::udp::endpoint rep, cep;
+				bool known = remote_rtp_endpoint(rep) || remote_rtcp_endpoint(cep);
+				if (known && (endpoint == rep || endpoint == cep))
+				{
+					if (log_)
+					{
+						log_->info("Remote SSRC changed: {} -> {}, mid={}", remote_rtp_ssrc(), packet->header()->ssrc, mid_)->flush();
+					}
+					set_remote_rtp_ssrc(packet->header()->ssrc);
+				}
 			}
 		}
 
@@ -1680,6 +1839,11 @@ namespace rtpx {
 			use_rtcp_endpoint_ = false;
 		}
 
+		// RFC 3550 §6.4.1：SR 携带发送方 SSRC，是对端 SSRC 的权威来源；未绑定时采纳
+		if (sr->ssrc != 0 && remote_rtp_ssrc() == 0)
+		{
+			set_remote_rtp_ssrc(sr->ssrc);
+		}
 
 		auto ss = senders();
 		for (auto s : ss)

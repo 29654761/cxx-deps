@@ -47,8 +47,14 @@ namespace rtpx {
 		active_ = false;
 		std::error_code ec;
 		timer_.cancel(ec);
-		
+
 		clear_media_streams();
+	}
+
+	void rtp_session::set_port_range(uint16_t min_port, uint16_t max_port)
+	{
+		ports_.reset(min_port, max_port);
+		has_own_ports_ = true;
 	}
 
 	bool rtp_session::create_offer(sdp& offer)
@@ -102,6 +108,11 @@ namespace rtpx {
 
 	bool rtp_session::set_remote_sdp(const sdp& remote_sdp, sdp_type_t type)
 	{
+		return set_remote_sdp(remote_sdp, type, std::map<std::string, std::pair<uint16_t, uint16_t>>());
+	}
+
+	bool rtp_session::set_remote_sdp(const sdp& remote_sdp, sdp_type_t type, const std::map<std::string, std::pair<uint16_t, uint16_t>>& prefer_ports)
+	{
 		remote_ice_lite_ = remote_sdp.has_attribute("ice-lite");
 
 
@@ -110,6 +121,7 @@ namespace rtpx {
 			sdp_role_ = sdp_type_answer;
 
 			std::map<std::string, uint16_t> sctp_streams;//For resume sctp connection
+			std::vector<std::pair<uint16_t, uint16_t>> old_ports;//For release unused transports
 			{
 				std::unique_lock<std::shared_mutex> lk(media_streams_mutex_);
 				for (auto& m : media_streams_)
@@ -118,14 +130,26 @@ namespace rtpx {
 					{
 						sctp_streams.insert(std::make_pair(m->mid(), m->sctp_stream_id()));
 					}
+					old_ports.emplace_back(m->local_rtp_port(), m->local_rtcp_port());
 					m->close();
 				}
 				media_streams_.clear();
 			}
 
-			
-			for (const auto& m : remote_sdp.medias)
+			// Release the transports which are no longer referenced
+			for (auto& ports : old_ports)
 			{
+				try_remove_transport(ports.first);
+				if (ports.second != ports.first)
+				{
+					try_remove_transport(ports.second);
+				}
+			}
+
+
+			for (size_t i = 0; i < remote_sdp.medias.size(); i++)
+			{
+				const sdp_media& m = remote_sdp.medias[i];
 				rtp_trans_mode_t tm = rtp_trans_mode_inactive;
 				if (m.trans_mode == rtp_trans_mode_sendrecv) {
 					tm = rtp_trans_mode_sendrecv;
@@ -138,7 +162,41 @@ namespace rtpx {
 				{
 					tm = rtp_trans_mode_sendonly;
 				}
-				auto ms=create_media_stream(m.media_type, m.mid, m.is_security(),m.msid_sid,m.msid_tid,tm,m.rtcp_mux);
+
+				// RFC 3264：mid 缺省时 m 行以位置为身份。对不带 mid 的 SIP 设备，
+				// 用 m 行下标合成内部唯一标识，保证流可寻址
+				std::string mid = m.mid;
+				if (mid.empty())
+				{
+					mid = std::to_string(i);
+				}
+
+				media_stream_ptr ms;
+				auto prefer = prefer_ports.find(mid);
+				if (prefer != prefer_ports.end() && prefer->second.first > 0)
+				{
+					// Reuse the transports on the preferred ports (keep the ports unchanged for re-negotiation)
+					transport_ptr rtp = create_transport(prefer->second.first, m.is_security());
+					if (!rtp)
+					{
+						return false;
+					}
+					transport_ptr rtcp = rtp;
+					if (!m.rtcp_mux && prefer->second.second > 0 && prefer->second.second != prefer->second.first)
+					{
+						rtcp = create_transport(prefer->second.second, m.is_security());
+						if (!rtcp)
+						{
+							return false;
+						}
+					}
+					ms = create_media_stream(m.media_type, mid, m.is_security(), rtp, rtcp, m.msid_sid, m.msid_tid, tm);
+				}
+				else
+				{
+					ms = create_media_stream(m.media_type, mid, m.is_security(), m.msid_sid, m.msid_tid, tm, m.rtcp_mux);
+				}
+
 				if (!ms)
 				{
 					return false;
@@ -172,28 +230,42 @@ namespace rtpx {
 				return false;
 			}
 
-			for (auto itr = media_streams_.begin(); itr != media_streams_.end();)
-			{
-				auto itr2 = std::find_if(remote_sdp.medias.begin(), remote_sdp.medias.end(), [itr](const sdp_media& a) {
-					return a.mid == (*itr)->mid();
-				});
-
-				if (itr2 != remote_sdp.medias.end()) 
+			// RFC 3264 §6/§8：应答的 m 行与 offer 数量相同、按位置一一对应，重协商保持原有顺序；
+			// RFC 5888 的 mid 是可选的分组标签（WebRTC 必带，SIP 设备常省略）。
+			// 匹配策略：优先按 mid 匹配；对端不带 mid 或 mid 对不上时，按 m 行位置匹配，
+			// 并以媒体类型一致性校验兜底，避免误配。
+			auto find_remote_media = [&remote_sdp](const media_stream_ptr& ms, size_t position) -> const sdp_media* {
+				if (!ms->mid().empty())
 				{
-					if ((*itr)->set_remote_sdp(*itr2, type)) 
+					auto itr = std::find_if(remote_sdp.medias.begin(), remote_sdp.medias.end(), [&ms](const sdp_media& a) {
+						return !a.mid.empty() && a.mid == ms->mid();
+					});
+					if (itr != remote_sdp.medias.end())
 					{
-						itr++;
+						return &(*itr);
 					}
-					else
-					{
-						(*itr)->close();
-						itr = media_streams_.erase(itr);
-					}
+				}
+				if (position < remote_sdp.medias.size()
+					&& remote_sdp.medias[position].media_type == ms->media_type())
+				{
+					return &remote_sdp.medias[position];
+				}
+				return nullptr;
+			};
+
+			std::unique_lock<std::shared_mutex> lk(media_streams_mutex_);
+			for (size_t i = 0; i < media_streams_.size();)
+			{
+				auto ms = media_streams_[i];
+				const sdp_media* remote_media = find_remote_media(ms, i);
+				if (remote_media && ms->set_remote_sdp(*remote_media, type))
+				{
+					i++;
 				}
 				else
 				{
-					(*itr)->close();
-					itr=media_streams_.erase(itr);
+					ms->close();
+					media_streams_.erase(media_streams_.begin() + i);
 				}
 			}
 
@@ -380,7 +452,9 @@ namespace rtpx {
 			if (m->media_type() == media_type_video)
 			{
 				uint32_t ssrc_media = m->remote_rtp_ssrc();
-				m->send_rtcp_keyframe(ssrc_media);
+				if (ssrc_media > 0) {
+					m->send_rtcp_keyframe(ssrc_media);
+				}
 			}
 		}
 	}
@@ -502,15 +576,15 @@ namespace rtpx {
 	void rtp_session::setup_transport(transport_ptr tp)
 	{
 		auto self = shared_from_this();
-		tp->on_rtp_packet = std::bind(&rtp_session::handle_rtp_packet, self, std::placeholders::_1, std::placeholders::_2);
+		tp->on_rtp_packet = std::bind(&rtp_session::handle_rtp_packet, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
 		tp->on_dtls_completed = std::bind(&rtp_session::handle_dtls_completed, self, tp->local_port(), std::placeholders::_1);
 		tp->on_stun_completed = std::bind(&rtp_session::handle_stun_completed, self,tp->local_port(), std::placeholders::_1);
-		tp->on_rtcp_app = std::bind(&rtp_session::handle_rtcp_app, self, std::placeholders::_1, std::placeholders::_2);
-		tp->on_rtcp_bye = std::bind(&rtp_session::handle_rtcp_bye, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
-		tp->on_rtcp_sr = std::bind(&rtp_session::handle_rtcp_sr, self, std::placeholders::_1, std::placeholders::_2);
-		tp->on_rtcp_rr = std::bind(&rtp_session::handle_rtcp_rr, self, std::placeholders::_1, std::placeholders::_2);
-		tp->on_rtcp_sdes = std::bind(&rtp_session::handle_rtcp_sdes, self, std::placeholders::_1, std::placeholders::_2);
-		tp->on_rtcp_fb = std::bind(&rtp_session::handle_rtcp_fb, self, std::placeholders::_1, std::placeholders::_2);
+		tp->on_rtcp_app = std::bind(&rtp_session::handle_rtcp_app, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+		tp->on_rtcp_bye = std::bind(&rtp_session::handle_rtcp_bye, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4);
+		tp->on_rtcp_sr = std::bind(&rtp_session::handle_rtcp_sr, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+		tp->on_rtcp_rr = std::bind(&rtp_session::handle_rtcp_rr, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+		tp->on_rtcp_sdes = std::bind(&rtp_session::handle_rtcp_sdes, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+		tp->on_rtcp_fb = std::bind(&rtp_session::handle_rtcp_fb, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
 
 		tp->on_sctp_connected = std::bind(&rtp_session::handle_sctp_connected, self, tp->local_port());
 		tp->on_sctp_disconnected = std::bind(&rtp_session::handle_sctp_disconnected, self, tp->local_port());
@@ -564,8 +638,18 @@ namespace rtpx {
 		return transports_;
 	}
 
+	port_range& rtp_session::usable_ports()
+	{
+		if (has_own_ports_)
+		{
+			return ports_;
+		}
+		return rtpx_core::instance()->ports();
+	}
+
 	bool rtp_session::create_transport_pair(bool security,bool rtcp_mux, transport_ptr& rtp, transport_ptr& rtcp)
 	{
+		port_range& ports = usable_ports();
 		if (is_port_mux_)
 		{
 			if(mux_port_>0)
@@ -584,10 +668,9 @@ namespace rtpx {
 			}
 			else
 			{
-				rtpx_core* core = rtpx_core::instance();
-				for (int i = 0; i < core->ports().count(); i++)
+				for (int i = 0; i < ports.count(); i++)
 				{
-					uint16_t port = core->ports().get_next_port();
+					uint16_t port = ports.get_next_port();
 					auto tp = create_transport(port, security);
 					if (tp)
 					{
@@ -603,12 +686,11 @@ namespace rtpx {
 		}
 		else
 		{
-			rtpx_core* core = rtpx_core::instance();
 			if (rtcp_mux)
 			{
-				for (int i = 0; i < core->ports().count(); i++)
+				for (int i = 0; i < ports.count(); i++)
 				{
-					uint16_t port = core->ports().get_next_port();
+					uint16_t port = ports.get_next_port();
 					auto tp = create_transport(port, security);
 					if (!tp)
 					{
@@ -622,9 +704,9 @@ namespace rtpx {
 			}
 			else
 			{
-				for (int i = 0; i < core->ports().count(); i++)
+				for (int i = 0; i < ports.count(); i++)
 				{
-					uint16_t port = core->ports().get_next_even_port();
+					uint16_t port = ports.get_next_even_port();
 					auto tp = create_transport(port, security);
 					if (!tp)
 					{
@@ -650,6 +732,7 @@ namespace rtpx {
 
 	bool rtp_session::create_transport_pair(bool security,bool rtcp_mux, custom_transport::send_hander sender, transport_ptr& rtp, transport_ptr& rtcp)
 	{
+		port_range& ports = usable_ports();
 		if (is_port_mux_)
 		{
 			if (mux_port_ > 0)
@@ -668,10 +751,9 @@ namespace rtpx {
 			}
 			else
 			{
-				rtpx_core* core = rtpx_core::instance();
-				for (int i = 0; i < core->ports().count(); i++)
+				for (int i = 0; i < ports.count(); i++)
 				{
-					uint16_t port = core->ports().get_next_port();
+					uint16_t port = ports.get_next_port();
 					auto tp = create_transport(port, security, sender);
 					if (tp)
 					{
@@ -687,10 +769,9 @@ namespace rtpx {
 		}
 		else
 		{
-			rtpx_core* core = rtpx_core::instance();
-			for (int i = 0; i < core->ports().count(); i++)
+			for (int i = 0; i < ports.count(); i++)
 			{
-				uint16_t port = core->ports().get_next_even_port();
+				uint16_t port = ports.get_next_even_port();
 				auto tp = create_transport(port, security, sender);
 				if (!tp)
 				{
@@ -715,12 +796,47 @@ namespace rtpx {
 	}
 
 
-	void rtp_session::handle_rtp_packet(packet_ptr pkt, const asio::ip::udp::endpoint& ep)
+	media_stream_ptr rtp_session::get_media_stream_by_local_port(uint16_t local_port, bool is_rtp) const
+	{
+		std::shared_lock<std::shared_mutex> lock(media_streams_mutex_);
+		media_stream_ptr found;
+		size_t count = 0;
+		for (auto& m : media_streams_)
+		{
+			uint16_t port = is_rtp ? m->local_rtp_port() : m->local_rtcp_port();
+			if (port == local_port)
+			{
+				count++;
+				found = m;
+			}
+		}
+		if (count == 1)
+		{
+			return found;
+		}
+		// 0 个或多个流占用该端口（如 BUNDLE 多流共享端口），交给 SSRC 路由处理，避免误路由
+		return nullptr;
+	}
+
+	void rtp_session::handle_rtp_packet(uint16_t local_port, packet_ptr pkt, const asio::ip::udp::endpoint& ep)
 	{
 		auto ms=this->get_media_stream_by_remote_ssrc(pkt->header()->ssrc);
+		if (!ms)
+		{
+			// RFC 3550：RTP 会话由传输地址（端口对）定义。SIP/H.323/RTSP 不交换对端 SSRC
+			//（H.245 没有 SSRC 字段），此时按本地端口路由，之后由首个收到的 RTP 包学习对端 SSRC
+			ms = this->get_media_stream_by_local_port(local_port, true);
+		}
 		if (ms)
 		{
 			ms->receive_rtp_packet(pkt,ep);
+		}
+		else
+		{
+			if (log_)
+			{
+				log_->warn("Cannot find media stream with unknown SSRC: {}", pkt->header()->ssrc)->flush();
+			}
 		}
 	}
 
@@ -757,18 +873,26 @@ namespace rtpx {
 
 
 
-	void rtp_session::handle_rtcp_app(const rtcp_app* app, const asio::ip::udp::endpoint& endpoint)
+	void rtp_session::handle_rtcp_app(uint16_t local_port, const rtcp_app* app, const asio::ip::udp::endpoint& endpoint)
 	{
 		auto ms = this->get_media_stream_by_remote_ssrc(app->ssrc);
+		if (!ms)
+		{
+			ms = this->get_media_stream_by_local_port(local_port, false);
+		}
 		if (ms)
 		{
 			ms->receive_rtcp_app(app,endpoint);
 		}
 	}
 
-	void rtp_session::handle_rtcp_bye(uint32_t ssrc, const char* reason, const asio::ip::udp::endpoint& endpoint)
+	void rtp_session::handle_rtcp_bye(uint16_t local_port, uint32_t ssrc, const char* reason, const asio::ip::udp::endpoint& endpoint)
 	{
 		auto ms = this->get_media_stream_by_remote_ssrc(ssrc);
+		if (!ms)
+		{
+			ms = this->get_media_stream_by_local_port(local_port, false);
+		}
 		if (ms)
 		{
 			ms->receive_rtcp_bye(ssrc,reason,endpoint);
@@ -780,17 +904,21 @@ namespace rtpx {
 		}
 	}
 
-	void rtp_session::handle_rtcp_sr(const rtcp_sr* sr, const asio::ip::udp::endpoint& endpoint)
+	void rtp_session::handle_rtcp_sr(uint16_t local_port, const rtcp_sr* sr, const asio::ip::udp::endpoint& endpoint)
 	{
 		update_.update();
 		auto ms = this->get_media_stream_by_remote_ssrc(sr->ssrc);
+		if (!ms)
+		{
+			ms = this->get_media_stream_by_local_port(local_port, false);
+		}
 		if (ms)
 		{
 			ms->receive_rtcp_sr(sr,endpoint);
 		}
 	}
 
-	void rtp_session::handle_rtcp_rr(const rtcp_rr* rr, const asio::ip::udp::endpoint& endpoint)
+	void rtp_session::handle_rtcp_rr(uint16_t local_port, const rtcp_rr* rr, const asio::ip::udp::endpoint& endpoint)
 	{
 		update_.update();
 		for (unsigned int i = 0; i < rr->header.common.count; i++)
@@ -803,17 +931,23 @@ namespace rtpx {
 		}
 	}
 
-	void rtp_session::handle_rtcp_sdes(const rtcp_sdes_entry* entry, const asio::ip::udp::endpoint& endpoint)
+	void rtp_session::handle_rtcp_sdes(uint16_t local_port, const rtcp_sdes_entry* entry, const asio::ip::udp::endpoint& endpoint)
 	{
-		auto ms = this->get_media_stream_by_local_ssrc(entry->id);
+		// SDES 块的 ssrc 是发送方（对端）的 SSRC，按对端 SSRC 查找，查不到按端口兜底
+		auto ms = this->get_media_stream_by_remote_ssrc(entry->id);
+		if (!ms)
+		{
+			ms = this->get_media_stream_by_local_port(local_port, false);
+		}
 		if (ms)
 		{
 			ms->receive_rtcp_sdes(entry,endpoint);
 		}
 	}
 
-	void rtp_session::handle_rtcp_fb(const rtcp_fb* fb, const asio::ip::udp::endpoint& endpoint)
+	void rtp_session::handle_rtcp_fb(uint16_t local_port, const rtcp_fb* fb, const asio::ip::udp::endpoint& endpoint)
 	{
+		// ssrc_media 是对端反馈的目标（我方发送流），按本地 SSRC 查找
 		auto ms = this->get_media_stream_by_local_ssrc(fb->ssrc_media);
 		if (ms)
 		{

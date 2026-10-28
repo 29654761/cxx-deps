@@ -59,6 +59,37 @@ session_->on_data_channel_opened = [this](const std::string& mid){} //DataChanne
 session_->on_data_channel_closed = [this](const std::string& mid){} //DataChannel关闭
 session_->on_data_channel_message= [this](const std::string& mid,const std::vector<uint8_t>& message){} //收到DataChannel消息
 ```
+### 媒体能力集（全局支持的媒体格式）
+本端支持的编解码格式通过全局能力集统一描述（RFC 3264）：
+- **Offer**：从能力集生成本端格式（含 fmtp、rtcp-fb），pt 使用注册时的建议值；
+- **Answer**：`set_remote_sdp(offer)` 内部自动按能力集匹配，只保留对端 offer 与能力集的交集，pt 沿用对端编号；
+- 格式匹配规则：codec、采样率、packetization-mode、profile、level（见 `sdp_format::is_compatible_with`）；
+- 未注册任何能力时保持旧行为（镜像对端 rtpmap），不影响既有调用方。
+
+注册能力集（进程内一次即可，应在创建 RTP Session 之前完成）：
+``` C++
+auto& caps = rtpx::media_capabilities::global();
+caps.clear();
+
+rtpx::sdp_format fmt(8, codec_type_pcma, 8000);
+caps.add_format(media_type_audio, fmt);
+
+fmt = rtpx::sdp_format(96, codec_type_h264, 90000);
+fmt.fmtp.set_packetization_mode(1);
+fmt.fmtp.set_profile_level_id(0x420028);
+fmt.fmtp.set_level_asymmetry_allowed(1);
+caps.add_format(media_type_video, fmt);
+```
+
+创建媒体流后从能力集生成本端格式：
+``` C++
+auto ms = session_->create_media_stream(media_type_video, "0", true, ms_sid, ms_tid, rtp_trans_mode_sendrecv);
+for (auto& fmt : rtpx::media_capabilities::global().formats(media_type_video))
+{
+    ms->add_local_format(fmt);
+}
+```
+
 ### Offer
 视频
 ``` C++

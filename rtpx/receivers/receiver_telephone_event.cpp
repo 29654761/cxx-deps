@@ -111,7 +111,7 @@ namespace rtpx
 		int frequency = format_.frequency > 0 ? format_.frequency : 8000;
 		uint32_t duration_ms = (uint32_t)((uint64_t)current_duration_ * 1000 / frequency);
 
-		on_dtmf(ssrc_, format_, current_event_, duration_ms);
+		on_dtmf.invoke(ssrc_, format_, current_event_, duration_ms);
 	}
 
 }

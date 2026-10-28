@@ -65,6 +65,7 @@ const codec_def_t codec_def[] = {
 	codec_type_h264,			"H264",
 	codec_type_h265,			"H265",
 	codec_type_opus,			"OPUS",
+	codec_type_pcmu,			"PCMU",
 	codec_type_pcma,			"PCMA",
 	codec_type_g722,			"G722",
 	codec_type_cn,				"CN",

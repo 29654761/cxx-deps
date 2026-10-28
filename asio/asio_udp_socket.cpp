@@ -5,6 +5,7 @@ namespace asio
 
 	udp_socket::udp_socket(asio::ip::udp::socket&& socket, size_t max_sending_queue_size)
 		:socket_(std::move(socket))
+		,max_sending_queue_size_(max_sending_queue_size)
 	{
 	}
 

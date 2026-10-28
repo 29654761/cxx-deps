@@ -14,6 +14,8 @@
 #include "transports/transport.h"
 #include "sdp/sdp_media.h"
 
+#include "media_capabilities.h"
+
 #include "senders/sender.h"
 #include "receivers/receiver.h"
 
@@ -45,6 +47,8 @@ namespace rtpx {
 		bool add_local_video_track(codec_type_t codec, uint8_t pt, int frequency = 90000, bool rtcp_fb = true);
 		bool add_local_audio_track(codec_type_t codec, uint8_t pt, int frequency, int channels = 1, bool rtcp_fb = true);
 		bool add_local_rtx_track(uint8_t pt, uint8_t apt, int frequency, bool rtcp_fb = true);
+		// 直接插入完整格式（含 fmtp、rtcp-fb），用于从能力集生成 offer
+		bool add_local_format(const sdp_format& fmt);
 
 		bool add_remote_video_track(codec_type_t codec, uint8_t pt, int frequency = 90000, bool rtcp_fb = true);
 		bool add_remote_audio_track(codec_type_t codec, uint8_t pt, int frequency, int channels = 1, bool rtcp_fb = true);
@@ -76,7 +80,7 @@ namespace rtpx {
 		void send_rtcp_nack(uint32_t ssrc_sender, uint32_t ssrc_media, uint16_t pid, uint16_t blp);
 
 		void use_rtp_endpoint(bool v) { use_rtp_endpoint_ = v; }
-		void use_rtcp_endpoint(bool v) { use_rtp_endpoint_ = v; }
+		void use_rtcp_endpoint(bool v) { use_rtcp_endpoint_ = v; }
 		void set_remote_rtp_endpoint(const asio::ip::udp::endpoint& endpoint, int64_t priority);
 		void set_remote_rtcp_endpoint(const asio::ip::udp::endpoint& endpoint, int64_t priority);
 		bool remote_rtp_endpoint(asio::ip::udp::endpoint& endpoint, int64_t* priority=nullptr)const;
@@ -247,6 +251,9 @@ namespace rtpx {
 		std::map<uint8_t, receiver_ptr> receivers_;
 
 		std::string app_proto_;
+		// 对端 application 媒体行的 proto 串（如 UDP/BFCP、RTP/AVP），用于不支持的
+		// 应用媒体在应答中按 RFC 3264 原样输出拒绝行（端口 0）
+		std::set<std::string> app_protos_;
 		uint16_t sctp_port_ = 0;
 		bool has_sctp_stream_id_ = false;
 		uint16_t sctp_stream_id_ = 0;

@@ -5,7 +5,7 @@
 #include <asn/h225.h>
 #include <h323/h323pdu.h>
 
-#include <litertp/avtypes.h>
+#include <rtpx/avtypes.h>
 
 #define OpalPluginCodec_Identifer_H264_Aligned        "0.0.8.241.0.0.0.0"
 #define OpalPluginCodec_Identifer_H264_NonInterleaved "0.0.8.241.0.0.0.1"

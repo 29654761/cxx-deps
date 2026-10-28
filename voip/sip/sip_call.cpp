@@ -8,8 +8,8 @@ namespace voip
 	namespace sip
 	{
 		sip_call::sip_call(endpoint_ptr ep, sip_connection_ptr con, const std::string& local_alias, const std::string& remote_alias, direction_t direction,
-			const std::string& nat_address, int port, litertp::port_range_ptr rtp_ports)
-			:call(local_alias,remote_alias,direction,nat_address,port,rtp_ports)
+			const std::string& nat_address, int port, rtpx::port_range_ptr rtp_ports)
+			:call(local_alias,remote_alias,direction,nat_address,port,rtp_ports,ep->io_context(),ep->logger())
 			,cseq_base_(1)
 			,ep_(ep)
 			,timer_(ep_->io_context())
@@ -29,212 +29,90 @@ namespace voip
 			}
 		}
 
-		bool sip_call::add_audio_channel_g711()
+		// 纯 SIP 的 SDP 通常没有 a=setup（DTLS 协商属性），rtpx 的校验依赖它。
+		// 这里对缺失 setup 的媒体注入安全默认值：offer 注入 actpass，answer 注入 passive，
+		// 与 voip 侧应答里抹掉 a=setup（stp/sdp_setup_none 不序列化）的行为配套。
+		static void ensure_setup(rtpx::sdp& sdp, sdp_type_t type)
+		{
+			for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
+			{
+				if (itr->setup != sdp_setup_none)
+					continue;
+				itr->setup = (type == sdp_type_offer) ? sdp_setup_actpass : sdp_setup_passive;
+			}
+		}
+
+		bool sip_call::add_audio_channel()
 		{
 			std::string mid = audio_mid_;
 			if (mid.empty())
 				mid = "audio";
-			uint32_t ssrc = sys::util::random_number<uint32_t>(100000000, 999999999);
-			auto ms = rtp_.create_media_stream(mid, media_type_audio, ssrc, nat_address_.c_str(), rtp_ports_, false);
+			auto ms = rtp_->create_media_stream(media_type_audio, mid, false, "", "", rtp_trans_mode_sendrecv, false);
 			if (!ms) {
 				return false;
 			}
-			ms->use_rtp_address(use_rtp_address_);
-			ms->add_local_audio_track(codec_type_pcma, 8, 8000);
-			return true;
+			ms->use_rtp_endpoint(use_rtp_address_);
+			ms->use_rtcp_endpoint(use_rtp_address_);
+			// 从全局能力集生成 send 格式（PCMA/PCMU/telephone-event）
+			auto fmts = rtpx::media_capabilities::global().formats(media_type_audio);
+			for (auto& fmt : fmts)
+			{
+				ms->add_local_format(fmt);
+			}
+			return fmts.size() > 0;
 		}
-		bool sip_call::add_audio_channel_g711(uint32_t ssrc,int rtp_port,int rtcp_port)
+
+		bool sip_call::add_video_channel()
 		{
-			std::string mid = audio_mid_;
+			std::string mid = video_mid_;
 			if (mid.empty())
-				mid = "audio";
-			auto ms = rtp_.create_media_stream(mid, media_type_audio, ssrc, nat_address_.c_str(), rtp_port,rtcp_port,true);
+				mid = "video";
+			auto ms = rtp_->create_media_stream(media_type_video, mid, false, "", "", rtp_trans_mode_sendrecv, false);
 			if (!ms) {
 				return false;
 			}
-			ms->use_rtp_address(use_rtp_address_);
-			ms->add_local_audio_track(codec_type_pcma, 8, 8000);
-			return true;
+			ms->use_rtp_endpoint(use_rtp_address_);
+			ms->use_rtcp_endpoint(use_rtp_address_);
+			// 从全局能力集生成 send 格式（H264/H265），带宽限制取当前配置
+			auto fmts = rtpx::media_capabilities::global().formats(media_type_video);
+			for (auto fmt : fmts)
+			{
+				fmt.fmtp.set_mbr(max_bitrate_);
+				ms->add_local_format(fmt);
+			}
+			return fmts.size() > 0;
 		}
 
-		bool sip_call::add_telephone_event(const litertp::sdp* remote_offer)
+		void sip_call::postprocess_local_sdp(rtpx::sdp& sdp)
 		{
-			auto ms = rtp_.get_media_stream(media_type_audio);
-			if (!ms)
+			sdp.bundle = false;
+			sdp.o = "srtc 2371158016 0 IN IP4 " + nat_address_;
+			sdp.b.push_back("CT:" + std::to_string(max_bitrate_));
+			for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
 			{
-				return false;
-			}
-
-			// 默认 101/8000；作为应答方时沿用对端 offer 里的 PT 和采样率，
-			// 保证两边对同一个 PT 的理解一致（对端可能用 96、100 等动态 PT）。
-			int pt = 101;
-			int frequency = 8000;
-			bool found = false;
-			if (remote_offer)
-			{
-				for (auto itr = remote_offer->medias.begin(); itr != remote_offer->medias.end() && !found; itr++)
+				if (itr->media_type == media_type_application)
 				{
-					if (itr->media_type != media_type_audio)
-						continue;
-					for (auto fmt = itr->rtpmap.begin(); fmt != itr->rtpmap.end(); fmt++)
-					{
-						if (fmt->second.codec != codec_type_telephone_event)
-							continue;
-						pt = fmt->second.pt;
-						frequency = fmt->second.frequency;
-						found = true;
-						// 音频是 G.711，优先选 8000 采样率的 telephone-event
-						if (frequency == 8000)
-							break;
-					}
+					// 不支持的应用媒体（BFCP/H.224 等）：rtpx 已按 RFC 3264 输出端口 0 的拒绝行，保持原样
+					continue;
 				}
-				if (!found)
+				itr->protos.erase("UDP");
+				itr->rtcp_rsize = false;
+				itr->setup = sdp_setup_none;
+				if (itr->media_type == media_type_video)
 				{
-					// 对端没带 telephone-event，不声明（对端只能走 SIP INFO 或带内音频发按键）
-					return false;
+					itr->b.push_back("AS:" + std::to_string(max_bitrate_));
+				}
+
+				// rtpx 不填充本端地址，这里补上 SDP 协商必需的地址与端口
+				auto ms = rtp_->get_media_stream_by_mid(itr->mid);
+				if (ms)
+				{
+					itr->rtp_address = nat_address_;
+					itr->rtcp_address = nat_address_;
+					itr->rtp_port = ms->local_rtp_port();
+					itr->rtcp_port = ms->is_rtcp_mux() ? ms->local_rtp_port() : ms->local_rtcp_port();
 				}
 			}
-
-			// 作为本地轨道加入，协商（negotiate）时才会保留在远端 rtpmap 里，
-			// 收到该 PT 的 RTP 包时 litertp 才会交给 receiver_telephone_event 解析。
-			return ms->add_local_audio_track(codec_type_telephone_event, (uint8_t)pt, frequency);
-		}
-
-		bool sip_call::add_video_channel_h264()
-		{
-			std::string mid = video_mid_;
-			if (mid.empty())
-				mid = "video";
-			uint32_t ssrc = sys::util::random_number<uint32_t>(100000000, 999999999);
-			auto ms=rtp_.create_media_stream(mid, media_type_video, ssrc, nat_address_.c_str(), rtp_ports_, false);
-			if (!ms) {
-				return false;
-			}
-			ms->use_rtp_address(use_rtp_address_);
-			{
-				ms->add_local_video_track(codec_type_h264, 96, 90000, true);
-				
-				litertp::fmtp fmtp;
-				fmtp.set_packetization_mode(1);
-				fmtp.set_profile_level_id(0x420028);
-				fmtp.set_mbps(245760);
-				fmtp.set_mfs(8192);
-				fmtp.set_mbr(max_bitrate_);
-				fmtp.set_level_asymmetry_allowed(1);
-				ms->set_local_fmtp(96, fmtp);
-			}
-			{
-				ms->add_local_video_track(codec_type_h264, 98, 90000, true);
-				litertp::fmtp fmtp;
-				fmtp.set_packetization_mode(1);
-				fmtp.set_profile_level_id(0x640028);
-				fmtp.set_mbps(245760);
-				fmtp.set_mfs(8192);
-				fmtp.set_mbr(max_bitrate_);
-				fmtp.set_level_asymmetry_allowed(1);
-				ms->set_local_fmtp(98, fmtp);
-			}
-			return true;
-		}
-
-		bool sip_call::add_video_channel_h264(uint32_t ssrc, int rtp_port, int rtcp_port)
-		{
-			std::string mid = video_mid_;
-			if (mid.empty())
-				mid = "video";
-			auto ms = rtp_.create_media_stream(mid, media_type_video, ssrc, nat_address_.c_str(), rtp_port, rtcp_port, true);
-			if (!ms) {
-				return false;
-			}
-			ms->use_rtp_address(use_rtp_address_);
-			{
-				ms->add_local_video_track(codec_type_h264, 96, 90000, true);
-
-				litertp::fmtp fmtp;
-				fmtp.set_packetization_mode(1);
-				fmtp.set_profile_level_id(0x420028);
-				fmtp.set_mbps(245760);
-				fmtp.set_mfs(8192);
-				fmtp.set_mbr(max_bitrate_);
-				fmtp.set_level_asymmetry_allowed(1);
-				ms->set_local_fmtp(96, fmtp);
-			}
-			{
-				ms->add_local_video_track(codec_type_h264, 98, 90000, true);
-				litertp::fmtp fmtp;
-				fmtp.set_packetization_mode(1);
-				fmtp.set_profile_level_id(0x640028);
-				fmtp.set_mbps(245760);
-				fmtp.set_mfs(8192);
-				fmtp.set_mbr(max_bitrate_);
-				fmtp.set_level_asymmetry_allowed(1);
-				ms->set_local_fmtp(98, fmtp);
-			}
-			return true;
-		}
-
-		bool sip_call::add_video_channel_h265()
-		{
-			std::string mid = video_mid_;
-			if (mid.empty())
-				mid = "video";
-			uint32_t ssrc = sys::util::random_number<uint32_t>(100000000, 999999999);
-			auto ms = rtp_.create_media_stream(mid, media_type_video, ssrc, nat_address_.c_str(), rtp_ports_, false);
-			if (!ms) {
-				return false;
-			}
-			ms->use_rtp_address(use_rtp_address_);
-			ms->add_local_video_track(codec_type_h265, 100, 90000, true);
-			litertp::fmtp fmtp;
-			fmtp.set_profile_id(1);
-			fmtp.set_level_id(0x0093);
-			fmtp.set_mbps(245760);
-			fmtp.set_mfs(8192);
-			fmtp.set_mbr(1920);
-			fmtp.set_level_asymmetry_allowed(1);
-			ms->set_local_fmtp(100, fmtp);
-
-			return true;
-		}
-
-		bool sip_call::add_video_channel_h265(uint32_t ssrc, int rtp_port, int rtcp_port)
-		{
-			std::string mid = video_mid_;
-			if (mid.empty())
-				mid = "video";
-			auto ms = rtp_.create_media_stream(mid, media_type_video, ssrc, nat_address_.c_str(), rtp_port,rtcp_port, true);
-			if (!ms) {
-				return false;
-			}
-			ms->use_rtp_address(use_rtp_address_);
-			ms->add_local_video_track(codec_type_h265, 100, 90000, true);
-			litertp::fmtp fmtp;
-			fmtp.set_profile_id(1);
-			fmtp.set_level_id(0x0093);
-			fmtp.set_mbps(245760);
-			fmtp.set_mfs(8192);
-			fmtp.set_mbr(1920);
-			fmtp.set_level_asymmetry_allowed(1);
-			ms->set_local_fmtp(100, fmtp);
-
-			return true;
-		}
-
-		bool sip_call::add_extend_video_channel_h264()
-		{
-			std::string mid = video_mid_;
-			if (mid.empty())
-				mid = "video";
-			auto ms = rtp_.create_application_stream(mid, "UDP/BFCP", rtp_ports_);
-			if (!ms) {
-				return false;
-			}
-			ms->add_local_attribute("floorctrl", "c-s");
-			ms->add_local_attribute("userid", "1");
-			ms->add_local_attribute("confid", "1");
-			ms->add_local_attribute("floorid", "2 mstrm:2");
-			ms->set_local_setup(sdp_setup_actpass);
-			return true;
 		}
 
 		std::string sip_call::id()const
@@ -266,26 +144,26 @@ namespace voip
 				return false;
 			}
 
-			if (audio)
-			{
-				if (!add_audio_channel_g711()) 
-				{
-					stop(call::reason_code_t::error);
-					return false;
-				}
-			}
-			if (video)
-			{
-				if (!add_video_channel_h264())
-				{
-					stop(call::reason_code_t::error);
-					return false;
-				}
-			}
-
-
 			if (direction_ == direction_t::outgoing)
 			{
+				// 主叫方从能力集构建 offer；应答方的媒体流由 answer() 里的 set_remote_sdp(offer) 依据对端 offer 创建
+				if (audio)
+				{
+					if (!add_audio_channel())
+					{
+						stop(call::reason_code_t::error);
+						return false;
+					}
+				}
+				if (video)
+				{
+					if (!add_video_channel())
+					{
+						stop(call::reason_code_t::error);
+						return false;
+					}
+				}
+
 				if (!invite())
 				{
 					stop(call::reason_code_t::error);
@@ -334,7 +212,7 @@ namespace voip
 			if (!active_.compare_exchange_strong(experted, false))
 				return;
 
-			rtp_.stop();
+			rtp_->stop();
 			std::error_code ec;
 			timer_.cancel(ec);
 
@@ -371,7 +249,7 @@ namespace voip
 
 		bool sip_call::require_keyframe()
 		{
-			rtp_.require_keyframe();
+			rtp_->require_keyframe();
 			return true;
 		}
 
@@ -389,7 +267,7 @@ namespace voip
 
 		bool sip_call::answer()
 		{
-			litertp::sdp remote_sdp;
+			rtpx::sdp remote_sdp;
 			if (!remote_sdp.parse(invite_.body))
 			{
 				auto con = get_con();
@@ -406,45 +284,31 @@ namespace voip
 				}
 				return false;
 			}
-			rtp_.set_remote_sdp(remote_sdp,sdp_type_offer);
-			add_telephone_event(&remote_sdp);
-			auto sdp=rtp_.create_answer();
-			sdp.bundle = false;
-			/*
-			std::stringstream ss;
-			ss << "v=0" << std::endl;
-			ss << "o=- 1732102601 1 IN IP4 192.168.0.86" << std::endl;
-			ss << "s=devgate/1.0.1" << std::endl;
-			ss << "t=0 0" << std::endl;
-			ss << "m=audio 50000 RTP/AVP 8" << std::endl;
-			ss << "c=IN IP4 192.168.0.86" << std::endl;
-			ss << "a=rtcp:50001 IN IP4 192.168.0.86" << std::endl;
-			ss << "a=sendrecv" << std::endl;
-			ss << "a=rtpmap:8 PCMA/8000" << std::endl;
-			ss << "a=ssrc:2838114036 cname:mPdeQpJvHzQwoiOkXmHR" << std::endl;
-			//ss << "a=ptime:20" << std::endl;
-			//ss << "a=maxptime:240" << std::endl;
-			ss << "m=video 50002 RTP/AVP 110" << std::endl;
-			ss << "c=IN IP4 192.168.0.86" << std::endl;
-			ss << "b=AS:1920" << std::endl;
-			ss << "b=TIAS:1920000" << std::endl;
-			ss << "a=sendrecv" << std::endl;
-			ss << "a=rtpmap:110 H264/90000" << std::endl;
-			ss << "a=fmtp:110 packetization-mode=1;max-br=1920;max-fs=8192;max-mbps=245760;profile-level-id=420028" << std::endl;
-			ss << "a=rtcp:50003 IN IP4 192.168.0.86" << std::endl;
-			ss << "a=label:11" << std::endl;
-			ss << "a=ssrc:3952510209 cname:mPdeQpJvHzQwoiOkXmHR" << std::endl;
-			ss << "a=rtcp-fb:* nack" << std::endl;
-			ss << "a=rtcp-fb:* nack pli" << std::endl;
-			ss << "a=rtcp-fb:* ccm fir" << std::endl;
-			ss << "a=rtcp-fb:* ccm tmmbr" << std::endl;
-			ss << "a=content:main" << std::endl;
-			*/
+			ensure_setup(remote_sdp, sdp_type_offer);
+			if (!rtp_->set_remote_sdp(remote_sdp, sdp_type_offer))
+			{
+				if (log_)
+				{
+					log_->error("SIP answer set_remote_sdp failed")->flush();
+				}
+				return false;
+			}
+
+			rtpx::sdp sdp;
+			if (!rtp_->create_answer(sdp))
+			{
+				return false;
+			}
+			postprocess_local_sdp(sdp);
 
 			auto self = shared_from_this();
 			for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
 			{
-				itr->protos.erase("UDP");
+				// 应用媒体（BFCP/H.224 等）已按 RFC 3264 拒绝，不向应用层回调
+				if (itr->media_type == media_type_application)
+				{
+					continue;
+				}
 				if (on_open_media)
 				{
 					on_open_media(self, itr->media_type, itr->mid);
@@ -457,7 +321,7 @@ namespace voip
 				return false;
 			}
 
-			rtp_.start();
+			rtp_->start();
 			return true;
 		}
 
@@ -500,16 +364,7 @@ namespace voip
 
 		void sip_call::on_re_invite(const sip_message& msg)
 		{
-			//auto con = get_con();
-			//if (con)
-			//{
-			//	sip_message rsp = ep_->create_response(msg, nullptr, false);
-			//	rsp.set_status("488");
-			//	rsp.set_msg("Not Accept Here");
-			//	con->send_message(rsp);
-			//}
-
-			litertp::sdp sdp;
+			rtpx::sdp sdp;
 			if (!sdp.parse(msg.body))
 			{
 				if (log_)
@@ -519,44 +374,21 @@ namespace voip
 				return;
 			}
 
-			int audio_rtp_port = 0, audio_rtcp_port = 0, video_rtp_port = 0, video_rtcp_port = 0;
-			uint32_t audio_ssrc = 0,video_ssrc=0;
-			auto mss=rtp_.get_media_streams();
-			for(auto itr=mss.begin();itr!=mss.end();itr++)
+			// 记录现有流的本地端口，重协商时保持端口不变（复用已绑定的 transport）
+			std::map<std::string, std::pair<uint16_t, uint16_t>> prefer_ports;
+			auto mss = rtp_->media_streams();
+			for (auto itr = mss.begin(); itr != mss.end(); itr++)
 			{
-				if((*itr)->media_type()==media_type_audio)
-				{
-					audio_rtp_port=(*itr)->transport_rtp_->port_;
-					audio_rtcp_port = (*itr)->transport_rtcp_->port_;
-					audio_ssrc=(*itr)->get_local_ssrc();
-				}
-				else if((*itr)->media_type()==media_type_video)
-				{
-					video_rtp_port = (*itr)->transport_rtp_->port_;
-					video_rtcp_port = (*itr)->transport_rtcp_->port_;
-					video_ssrc = (*itr)->get_local_ssrc();
-				}
+				prefer_ports[(*itr)->mid()] = std::make_pair((*itr)->local_rtp_port(), (*itr)->local_rtcp_port());
 
 				if (on_close_media)
 				{
 					on_close_media(shared_from_this(), (*itr)->media_type(), (*itr)->mid());
 				}
 			}
-			rtp_.clear_media_streams();
-			for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
-			{
-				std::string mid = itr->mid;
-				if (itr->media_type == media_type_audio)
-				{
-					add_audio_channel_g711(audio_ssrc,audio_rtp_port,audio_rtcp_port);
-				}
-				else if (itr->media_type == media_type_video)
-				{
-					add_video_channel_h264(video_ssrc,video_rtp_port,video_rtcp_port);
-				}
-			}
 
-			if (!rtp_.set_remote_sdp(sdp, sdp_type_offer))
+			ensure_setup(sdp, sdp_type_offer);
+			if (!rtp_->set_remote_sdp(sdp, sdp_type_offer, prefer_ports))
 			{
 				if (log_)
 				{
@@ -564,23 +396,20 @@ namespace voip
 				}
 				return;
 			}
-			add_telephone_event(&sdp);
 
-			litertp::sdp answer=rtp_.create_answer();
-			answer.bundle = false;
-			answer.o = "srtc 2371158016 0 IN IP4 " + nat_address_;
-			answer.b.push_back("CT:" + std::to_string(max_bitrate_));
+			rtpx::sdp answer;
+			if (!rtp_->create_answer(answer))
+			{
+				return;
+			}
+			postprocess_local_sdp(answer);
 			for (auto itr = answer.medias.begin(); itr != answer.medias.end(); itr++)
 			{
-				itr->rtcp_rsize = false;
-				if (itr->media_type == media_type_video)
+				// 应用媒体（BFCP/H.224 等）已按 RFC 3264 拒绝，不向应用层回调
+				if (itr->media_type == media_type_application)
 				{
-					itr->b.push_back("AS:" + std::to_string(max_bitrate_));
-					//itr->b.push_back("TIAS:" + std::to_string((uint32_t)(max_bitrate_ * 1000)));
+					continue;
 				}
-				itr->setup = stp_setup_none;
-				itr->protos.erase("UDP");
-
 				if (on_open_media)
 				{
 					auto self = shared_from_this();
@@ -816,10 +645,11 @@ namespace voip
 				}
 				msg.headers.get("Record-Route", record_route_);
 
-				litertp::sdp sdp;
+				rtpx::sdp sdp;
 				if (sdp.parse(msg.body))
 				{
-					rtp_.set_remote_sdp(sdp, sdp_type_answer);
+					ensure_setup(sdp, sdp_type_answer);
+					rtp_->set_remote_sdp(sdp, sdp_type_answer);
 				}
 				auto self = shared_from_this();
 				for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
@@ -834,7 +664,7 @@ namespace voip
 				msg.to().get("tag", other_tag_);
 				ack(msg);
 
-				rtp_.start();
+				rtp_->start();
 			}
 			else if (strcasecmp(method.c_str(), "BYE") == 0)
 			{
@@ -887,23 +717,13 @@ namespace voip
 			req.set_call_id(call_id_);
 			req.set_content_type("application/sdp");
 
-			// telephone-event 作为本地轨道声明（101/8000），对端应答后协商结果里保留它，按键 RTP 包才能被识别
-			add_telephone_event(nullptr);
-			litertp::sdp sdp = rtp_.create_offer();
-			sdp.bundle = false;
-			sdp.o = "srtc 2371158016 0 IN IP4 "+ nat_address_;
-			sdp.b.push_back("CT:" + std::to_string(max_bitrate_));
-			for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
+			// offer 的 rtpmap 来自能力集（含 telephone-event），对端应答后按交集协商
+			rtpx::sdp sdp;
+			if (!rtp_->create_offer(sdp))
 			{
-				itr->rtcp_rsize = false;
-				if (itr->media_type == media_type_video)
-				{
-					itr->b.push_back("AS:" + std::to_string(max_bitrate_));
-					//itr->b.push_back("TIAS:" + std::to_string((uint32_t)(max_bitrate_ * 1000)));
-				}
-				itr->setup = stp_setup_none;
-				itr->protos.erase("UDP");
+				return false;
 			}
+			postprocess_local_sdp(sdp);
 			std::string s = sdp.to_string();
 			//std::stringstream ss;
 			//ss << "v=0\r\n";

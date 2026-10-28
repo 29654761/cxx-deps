@@ -27,7 +27,7 @@ include(${CXX_DEPS}/cmake/opal.cmake)
 target_link_libraries(${PROJECT_NAME} PUBLIC
     asio
     sip
-    litertp
-    
+    rtpx
+
 )
 

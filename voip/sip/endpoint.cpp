@@ -69,13 +69,13 @@ namespace voip
 
 
 
-		void endpoint::set_rtp_ports(litertp::port_range_ptr ports)
+		void endpoint::set_rtp_ports(rtpx::port_range_ptr ports)
 		{
 			std::unique_lock<std::shared_mutex> lk(mutex_);
 			rtp_ports_ = ports;
 		}
 
-		litertp::port_range_ptr endpoint::rtp_ports()const
+		rtpx::port_range_ptr endpoint::rtp_ports()const
 		{
 			std::shared_lock<std::shared_mutex> lk(mutex_);
 			return rtp_ports_;
@@ -787,7 +787,7 @@ namespace voip
 				call->set_gkclient(true);
 			}
 
-			litertp::sdp sdp;
+			rtpx::sdp sdp;
 			if (sdp.parse(message.body))
 			{
 				for (auto m : sdp.medias)

@@ -19,8 +19,8 @@ namespace voip
 
 		h323_call::h323_call(endpoint_ptr ep, tcp_socket_ptr h225_skt, const std::string& local_alias,const std::string& remote_alias, direction_t direction,
 			const std::string& nat_address, int port,
-			litertp::port_range_ptr h245_ports, litertp::port_range_ptr rtp_ports)
-			:call(local_alias,remote_alias, direction, nat_address, port, rtp_ports)
+			rtpx::port_range_ptr h245_ports, rtpx::port_range_ptr rtp_ports)
+			:call(local_alias,remote_alias, direction, nat_address, port, rtp_ports, ep->io_context(), ep->logger())
 			, ep_(ep)
 			,h225_skt_(h225_skt)
 			,h245_listen_(ep->io_context())
@@ -38,14 +38,18 @@ namespace voip
 			url_.scheme = "h323";
 			call_type_ = call_type_t::h323;
 
+			// rtpx 内部请求关键帧（RTCP PLI/FIR）时转走 H.245 MiscellaneousCommand，
+			// 而不是直接发 RTCP FB（H.323 对端不处理 RTCP FB）
+			rtp_->on_send_require_keyframe = [this](const std::string&) { require_keyframe(); };
+
 			h225_sending_queue_ = std::make_shared<asio::sending_queue>();
 			h245_sending_queue_ = std::make_shared<asio::sending_queue>();
 		}
 
 		h323_call::h323_call(endpoint_ptr ep,const asio::ip::tcp::endpoint& h225_addr, const std::string& local_alias, const std::string& remote_alias, direction_t direction,
 			const std::string& nat_address, int port,
-			litertp::port_range_ptr h245_ports, litertp::port_range_ptr rtp_ports)
-			:call(local_alias,remote_alias, direction, nat_address, port, rtp_ports)
+			rtpx::port_range_ptr h245_ports, rtpx::port_range_ptr rtp_ports)
+			:call(local_alias,remote_alias, direction, nat_address, port, rtp_ports, ep->io_context(), ep->logger())
 			, ep_(ep)
 			, h225_addr_(h225_addr)
 			, h245_listen_(ep->io_context())
@@ -62,6 +66,10 @@ namespace voip
 			h245_recv_buffer_.fill(0);
 			url_.scheme = "h323";
 			call_type_ = call_type_t::h323;
+
+			// rtpx 内部请求关键帧（RTCP PLI/FIR）时转走 H.245 MiscellaneousCommand，
+			// 而不是直接发 RTCP FB（H.323 对端不处理 RTCP FB）
+			rtp_->on_send_require_keyframe = [this](const std::string&) { require_keyframe(); };
 
 			h225_sending_queue_ = std::make_shared<asio::sending_queue>();
 			h245_sending_queue_ = std::make_shared<asio::sending_queue>();
@@ -242,7 +250,7 @@ namespace voip
 				if (!active_.compare_exchange_strong(experted, false))
 					return;
 
-				rtp_.stop();
+				rtp_->stop();
 				std::error_code ec;
 				timer_.cancel(ec);
 				if (h245_skt_)
@@ -570,9 +578,8 @@ namespace voip
 								std::lock_guard<std::recursive_mutex> lk(opened_local_channels_mutex_);
 								opened_local_channels_.push_back(*itr);
 							}
-							auto sdp=ms->get_local_sdp();
 							this->send_open_audio_logical_channel(local_chann.channel_number, codec, itr->session_id, local_chann.payload_type,
-								PIPSocket::Address(sdp.rtcp_address), sdp.rtcp_port);
+								PIPSocket::Address(nat_address_.c_str()), ms->local_rtcp_port());
 						}
 					}
 					else if (itr->media_type == media_type_video&&!has_video&&itr->type==media_channel_type_t::notmal)
@@ -588,12 +595,11 @@ namespace voip
 								std::lock_guard<std::recursive_mutex> lk(opened_local_channels_mutex_);
 								opened_local_channels_.push_back(*itr);
 							}
-							auto sdp = ms->get_local_sdp();
 							H245_ArrayOf_GenericParameter collapsing;
 							h323_util::fill_video_collapsing(collapsing, itr->profile, itr->level, itr->mbps, itr->mfs, itr->max_nal_size);
 
 							this->send_open_video_logical_channel(local_chann.channel_number, codec, itr->session_id, local_chann.max_bitrate, local_chann.payload_type,
-								PIPSocket::Address(sdp.rtcp_address), sdp.rtcp_port, collapsing);
+								PIPSocket::Address(nat_address_.c_str()), ms->local_rtcp_port(), collapsing);
 
 						}
 					}
@@ -601,7 +607,7 @@ namespace voip
 			}
 
 
-			rtp_.start();
+			rtp_->start();
 		}
 
 		void h323_call::close_remote_channels()
@@ -651,27 +657,37 @@ namespace voip
 			return false;
 		}
 
-		litertp::media_stream_ptr h323_call::get_media_stream(media_type_t mt, const std::string& mid)
+		rtpx::media_stream_ptr h323_call::get_media_stream(media_type_t mt, const std::string& mid)
 		{
-			auto ms=rtp_.get_media_stream(mid);
+			auto ms=rtp_->get_media_stream_by_mid(mid);
 			if (ms)
 				return ms;
 
-			ms = rtp_.create_media_stream(mid, mt, 0, nat_address_.c_str(), rtp_ports_, false);
+			ms = rtp_->create_media_stream(mt, mid, false, "", "", rtp_trans_mode_sendrecv, false);
 			if (ms)
 			{
-				ms->use_rtp_address(use_rtp_address_);
-				if (mt == media_type_video)
-				{
-					ms->on_require_keyframe.add(s_litertp_on_require_keyframe, this);
-				}
+				ms->use_rtp_endpoint(use_rtp_address_);
+				ms->use_rtcp_endpoint(use_rtp_address_);
 			}
 			return ms;
 		}
 
 		bool h323_call::remove_media_stream(const std::string& mid)
 		{
-			return rtp_.remove_media_stream(mid);
+			return rtp_->remove_media_stream_by_mid(mid);
+		}
+
+		asio::ip::udp::endpoint h323_call::sockaddr_to_endpoint(const sockaddr_storage& addr)
+		{
+			if (addr.ss_family == AF_INET6)
+			{
+				const sockaddr_in6* in6 = (const sockaddr_in6*)&addr;
+				asio::ip::address_v6::bytes_type bytes = {};
+				memcpy(bytes.data(), in6->sin6_addr.s6_addr, bytes.size());
+				return asio::ip::udp::endpoint(asio::ip::address_v6(bytes), ntohs(in6->sin6_port));
+			}
+			const sockaddr_in* in = (const sockaddr_in*)&addr;
+			return asio::ip::udp::endpoint(asio::ip::address_v4(ntohl(in->sin_addr.s_addr)), ntohs(in->sin_port));
 		}
 		
 		bool h323_call::has_h239_control()
@@ -2093,18 +2109,7 @@ namespace voip
 			desc->m_simultaneousCapabilities.Append(acs);
 
 			descs.Append(desc);
-			
-		}
 
-		void h323_call::s_litertp_on_require_keyframe(void* ctx, uint32_t ssrc, uint32_t ssrc_media)
-		{
-			h323_call* p = (h323_call*)ctx;
-			p->require_keyframe();
-			if (p->log_)
-			{
-				std::string url = p->url_.to_string();
-				p->log_->trace("H.323:litertp require keyframe, url={}", url)->flush();
-			}
 		}
 
 		void h323_call::on_h225_tpkt(const PBYTEArray& tpkt)
@@ -2735,7 +2740,7 @@ namespace voip
 			}
 
 			this->send_terminal_capability_set_ack(body.m_sequenceNumber);
-			rtp_.start();
+			rtp_->start();
 			tcs_ready_ = true;
 			on_terminal_capability_complete();
 			if (log_)
@@ -3044,23 +3049,23 @@ namespace voip
 				opened_remote_channels_.push_back(open_chann);
 			}
 
-			auto sdp=ms->get_local_sdp();
-			send_open_logical_channel_ack(open_chann.channel_number, open_chann.session_id,sdp.rtp_address,sdp.rtp_port,sdp.rtcp_address,sdp.rtcp_port);
+			PString local_rtp_address = nat_address_.c_str();
+			send_open_logical_channel_ack(open_chann.channel_number, open_chann.session_id, local_rtp_address, ms->local_rtp_port(), local_rtp_address, ms->local_rtcp_port());
 
 			PString media_address_str = media_address.AsString();
 			if (!media_address_str.IsEmpty() && media_port > 0)
 			{
 				sockaddr_storage rtp_addr = {};
 				sys::socket::ep2addr(media_address.AsString().c_str(), media_port, (sockaddr*)&rtp_addr);
-				ms->set_remote_rtp_endpoint((const sockaddr*)&rtp_addr, sizeof(rtp_addr), 0);
+				ms->set_remote_rtp_endpoint(sockaddr_to_endpoint(rtp_addr), 0);
 			}
 
 			sockaddr_storage rtcp_addr = {};
 			sys::socket::ep2addr(media_ctrl_address.AsString().c_str(), media_ctrl_port, (sockaddr*)&rtcp_addr);
-			ms->set_remote_rtcp_endpoint((const sockaddr*)&rtcp_addr, sizeof(rtcp_addr), 0);
+			ms->set_remote_rtcp_endpoint(sockaddr_to_endpoint(rtcp_addr), 0);
 
 			// Now can send meida data to remote.
-			ms->run_stun_request();
+			ms->send_stun_request();
 
 			if (on_open_media)
 			{
@@ -3072,7 +3077,7 @@ namespace voip
 			{
 				std::string url = url_.to_string();
 				log_->debug("H.323: on_open_logical_channel ,url={}, chann={}, media={},code={}, rtp={}:{}, rtcp={}:{}",
-					url, open_chann.channel_number,open_chann.media_type,open_chann.codec_type, sdp.rtp_address, sdp.rtp_port, sdp.rtcp_address, sdp.rtcp_port)->flush();
+					url, open_chann.channel_number,open_chann.media_type,open_chann.codec_type, (const char*)local_rtp_address, ms->local_rtp_port(), (const char*)local_rtp_address, ms->local_rtcp_port())->flush();
 			}
 		}
 
@@ -3151,14 +3156,14 @@ namespace voip
 
 			sockaddr_storage rtp_addr = {};
 			sys::socket::ep2addr(media_address.AsString().c_str(), media_port, (sockaddr*)&rtp_addr);
-			ms->set_remote_rtp_endpoint((const sockaddr*)&rtp_addr, sizeof(rtp_addr), 0);
+			ms->set_remote_rtp_endpoint(sockaddr_to_endpoint(rtp_addr), 0);
 
 			sockaddr_storage rtcp_addr = {};
 			sys::socket::ep2addr(media_ctrl_address.AsString().c_str(), media_ctrl_port, (sockaddr*)&rtcp_addr);
-			ms->set_remote_rtcp_endpoint((const sockaddr*)&rtcp_addr, sizeof(rtcp_addr), 0);
-			
+			ms->set_remote_rtcp_endpoint(sockaddr_to_endpoint(rtcp_addr), 0);
+
 			// Now can send meida data to remote.
-			ms->run_stun_request();
+			ms->send_stun_request();
 
 			if (local_chann.type == media_channel_type_t::extend)
 			{
@@ -3443,12 +3448,11 @@ namespace voip
 							std::lock_guard<std::recursive_mutex> lk(opened_local_channels_mutex_);
 							opened_local_channels_.push_back(local);
 						}
-						auto sdp = ms->get_local_sdp();
 						H245_ArrayOf_GenericParameter collapsing;
 						h323_util::fill_video_collapsing(collapsing, remote.profile, remote.level, remote.mbps, remote.mfs, remote.max_nal_size);
 
 						this->send_open_video_logical_channel(local.channel_number, codec, local.session_id, local.max_bitrate, local.payload_type,
-							PIPSocket::Address(sdp.rtcp_address), sdp.rtcp_port, collapsing);
+							PIPSocket::Address(nat_address_.c_str()), ms->local_rtcp_port(), collapsing);
 						send_h239_presentation_owner(h239_token_channel_, h239_terminal_label_);
 					}
 					else

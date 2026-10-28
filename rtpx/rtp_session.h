@@ -10,6 +10,7 @@
 #include <map>
 #include "media_stream.h"
 #include "sdp/sdp.h"
+#include "util/port_range.h"
 #include "transports/udp_transport.h"
 #include "transports/custom_transport.h"
 
@@ -45,6 +46,9 @@ namespace rtpx {
 		bool create_offer(sdp& offer);
 		bool create_answer(sdp& answer);
 		bool set_remote_sdp(const sdp& remote_sdp, sdp_type_t type);
+		// prefer_ports: mid -> 期望使用的本地 (rtp_port, rtcp_port)。作为应答方处理 offer 时，
+		// 命中的 mid 会优先复用指定端口上已存在的 transport（用于 SIP re-INVITE 等保持端口的场景）。
+		bool set_remote_sdp(const sdp& remote_sdp, sdp_type_t type, const std::map<std::string, std::pair<uint16_t, uint16_t>>& prefer_ports);
 
 		media_stream_ptr create_media_stream(media_type_t mt, const std::string& mid,bool security, const std::string& ms_stream_id = "", const std::string& ms_track_id = "",rtp_trans_mode_t trans_mode=rtp_trans_mode_sendrecv, bool rtcp_mux = true);
 		media_stream_ptr create_media_stream(media_type_t mt, const std::string& mid, bool security, custom_transport::send_hander sender, const std::string& ms_stream_id = "", const std::string& ms_track_id = "", rtp_trans_mode_t trans_mode = rtp_trans_mode_sendrecv,bool rtcp_mux = true);
@@ -54,9 +58,14 @@ namespace rtpx {
 		media_stream_ptr get_media_stream_by_msid(const std::string& sid, const std::string& tid);
 		media_stream_ptr get_media_stream_by_remote_ssrc(uint32_t ssrc);
 		media_stream_ptr get_media_stream_by_local_ssrc(uint32_t ssrc);
+		// 按本地端口查找流。仅当该端口恰好被一个流占用时返回（BUNDLE 多流共享端口时返回空，避免误路由）
+		media_stream_ptr get_media_stream_by_local_port(uint16_t local_port, bool is_rtp) const;
 		void clear_media_streams();
 
 		sdp_type_t sdp_role()const { return sdp_role_; }
+
+		// 设置本会话专属的 RTP 端口分配范围；不设置时使用 rtpx_core 的全局端口范围
+		void set_port_range(uint16_t min_port, uint16_t max_port);
 
 		void require_keyframe();
 		bool require_keyframe(const std::string& mid);
@@ -67,6 +76,7 @@ namespace rtpx {
 		transport_ptr create_transport(uint16_t port, bool security);
 		transport_ptr create_transport(uint16_t port, bool security, custom_transport::send_hander sender);
 		void setup_transport(transport_ptr tp);
+		port_range& usable_ports();
 		transport_ptr get_transport(uint16_t port) const;
 		bool try_remove_transport(uint16_t port);
 		std::vector<transport_ptr> transports() const;
@@ -75,15 +85,15 @@ namespace rtpx {
 		bool create_transport_pair(bool security, bool rtcp_mux, custom_transport::send_hander sender,transport_ptr& rtp, transport_ptr& rtcp);
 
 	protected:
-		void handle_rtp_packet(packet_ptr pkt, const asio::ip::udp::endpoint& ep);
+		void handle_rtp_packet(uint16_t local_port, packet_ptr pkt, const asio::ip::udp::endpoint& ep);
 		void handle_stun_completed(uint16_t local_port, const asio::ip::udp::endpoint& ep);
 		void handle_dtls_completed(uint16_t local_port, dtls_role_t dtls_role);
-		void handle_rtcp_app(const rtcp_app* app, const asio::ip::udp::endpoint& endpoint);
-		void handle_rtcp_bye(uint32_t ssrc, const char* reason, const asio::ip::udp::endpoint& endpoint);
-		void handle_rtcp_sr(const rtcp_sr* sr, const asio::ip::udp::endpoint& endpoint);
-		void handle_rtcp_rr(const rtcp_rr* rr, const asio::ip::udp::endpoint& endpoint);
-		void handle_rtcp_sdes(const rtcp_sdes_entry* entry, const asio::ip::udp::endpoint& endpoint);
-		void handle_rtcp_fb(const rtcp_fb* fb, const asio::ip::udp::endpoint& endpoint);
+		void handle_rtcp_app(uint16_t local_port, const rtcp_app* app, const asio::ip::udp::endpoint& endpoint);
+		void handle_rtcp_bye(uint16_t local_port, uint32_t ssrc, const char* reason, const asio::ip::udp::endpoint& endpoint);
+		void handle_rtcp_sr(uint16_t local_port, const rtcp_sr* sr, const asio::ip::udp::endpoint& endpoint);
+		void handle_rtcp_rr(uint16_t local_port, const rtcp_rr* rr, const asio::ip::udp::endpoint& endpoint);
+		void handle_rtcp_sdes(uint16_t local_port, const rtcp_sdes_entry* entry, const asio::ip::udp::endpoint& endpoint);
+		void handle_rtcp_fb(uint16_t local_port, const rtcp_fb* fb, const asio::ip::udp::endpoint& endpoint);
 	
 		void handle_timer(const std::error_code& ec);
 
@@ -120,6 +130,9 @@ namespace rtpx {
 
 		bool stun_ = true;
 		bool ice_lite_ = false;
+
+		bool has_own_ports_ = false;
+		port_range ports_;
 
 		std::string ice_ufrag_;
 		std::string ice_pwd_;

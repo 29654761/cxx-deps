@@ -1,5 +1,6 @@
 #pragma once
-#include <litertp/rtp_session.h>
+#include <asio.hpp>
+#include <rtpx/rtp_session.h>
 #include <sip/voip_uri.h>
 #include <spdlog/spdlogger.hpp>
 
@@ -66,7 +67,8 @@ namespace voip
 		typedef std::function<void(call_ptr, char digit, int duration_ms)> on_dtmf_t;
 
 		call(const std::string& local_alias,const std::string& remote_alias, direction_t direction,
-			const std::string& nat_address, int port,litertp::port_range_ptr rtp_ports);
+			const std::string& nat_address, int port, rtpx::port_range_ptr rtp_ports,
+			asio::io_context& ioc, spdlogger_ptr log);
 		virtual ~call();
 		void set_logger(spdlogger_ptr log) { log_ = log; }
 		void set_url(const voip_uri& url) { url_ = url; }
@@ -114,9 +116,16 @@ namespace voip
 		// 统一的按键出口：过滤非法字符后回调 on_dtmf
 		void invoke_dtmf(char digit, int duration_ms);
 	private:
-		static void s_litertp_on_frame(void* ctx, const char* mid, uint32_t ssrc, uint16_t pt, int frequency, int channels, const av_frame_t* frame);
-		static void s_litertp_on_received_require_keyframe(void* ctx, uint32_t ssrc, int mode);
-		static void s_litertp_on_dtmf(void* ctx, const char* mid, uint32_t ssrc, uint8_t event, uint32_t duration_ms);
+		// rtpx 回调桥接，转发到公开的 on_frame / on_received_require_keyframe / on_dtmf
+		void on_rtpx_frame(const std::string& mid, const std::string& sid, const std::string& tid, const rtpx::sdp_format& fmt, const av_frame_t& frame);
+		void on_rtpx_receive_require_keyframe(const std::string& mid);
+		void on_rtpx_dtmf(const std::string& mid, const std::string& sid, const std::string& tid, uint8_t event, uint32_t duration_ms);
+		// 从媒体的本地格式中挑一个用于发送的 payload type：
+		// 音频优先 PCMA、其次 PCMU（与旧版 litertp 行为一致），并跳过 telephone-event/rtx
+		bool pick_send_pt(rtpx::media_stream_ptr ms, uint8_t& pt);
+		// 进程内注册一次默认能力集（PCMA/PCMU/telephone-event/H264/H265）。
+		// offer 从能力集生成，answer 只保留对端 offer 与能力集的交集（见 rtpx::media_capabilities）
+		static void register_default_capabilities();
 
 	protected:
 		on_ringing_t on_remote_ringing;
@@ -141,8 +150,8 @@ namespace voip
 		int local_port_ = 0;
 
 		direction_t direction_ = direction_t::incoming;
-		litertp::port_range_ptr rtp_ports_;
-		litertp::rtp_session rtp_;
+		rtpx::port_range_ptr rtp_ports_;
+		rtpx::rtp_session_ptr rtp_;
 
 
 		std::atomic<int64_t> updated_at_;

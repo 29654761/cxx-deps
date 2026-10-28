@@ -36,15 +36,17 @@ namespace rtpx
 	{
 	public:
 
-		typedef std::function<void(packet_ptr, const asio::ip::udp::endpoint&)> rtp_packet_handler;
+		// local_port: 收到包的本地端口。RFC 3550 以传输地址（端口对）划分 RTP 会话，
+		// SSRC 未协商的协议（SIP/H.323/RTSP）依赖本地端口做流路由
+		typedef std::function<void(uint16_t local_port, packet_ptr, const asio::ip::udp::endpoint&)> rtp_packet_handler;
 		typedef std::function<void(dtls_role_t dtls_role)> dtls_completed_handler;
 		typedef std::function<void(const asio::ip::udp::endpoint&)> stun_completed_handler;
-		typedef std::function<void(const rtcp_app*, const asio::ip::udp::endpoint&)> rtcp_app_handler;
-		typedef std::function<void(uint32_t, const char*, const asio::ip::udp::endpoint&)> rtcp_bye_handler;
-		typedef std::function<void(const rtcp_sr*, const asio::ip::udp::endpoint&)> rtcp_sr_handler;
-		typedef std::function<void(const rtcp_rr*, const asio::ip::udp::endpoint&)> rtcp_rr_handler;
-		typedef std::function<void(const rtcp_sdes_entry*, const asio::ip::udp::endpoint&)> rtcp_sdes_handler;
-		typedef std::function<void(const rtcp_fb*, const asio::ip::udp::endpoint&)> rtcp_fb_handler;
+		typedef std::function<void(uint16_t local_port, const rtcp_app*, const asio::ip::udp::endpoint&)> rtcp_app_handler;
+		typedef std::function<void(uint16_t local_port, uint32_t, const char*, const asio::ip::udp::endpoint&)> rtcp_bye_handler;
+		typedef std::function<void(uint16_t local_port, const rtcp_sr*, const asio::ip::udp::endpoint&)> rtcp_sr_handler;
+		typedef std::function<void(uint16_t local_port, const rtcp_rr*, const asio::ip::udp::endpoint&)> rtcp_rr_handler;
+		typedef std::function<void(uint16_t local_port, const rtcp_sdes_entry*, const asio::ip::udp::endpoint&)> rtcp_sdes_handler;
+		typedef std::function<void(uint16_t local_port, const rtcp_fb*, const asio::ip::udp::endpoint&)> rtcp_fb_handler;
 
 		transport(asio::io_context& ioc, uint16_t local_port,spdlogger_ptr log);
 		~transport();

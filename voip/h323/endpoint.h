@@ -38,11 +38,13 @@ namespace voip
 			void set_nat_address(const PString& nat_address);
 			PString nat_address()const;
 
-			void set_h245_ports(litertp::port_range_ptr ports);
-			litertp::port_range_ptr h245_ports()const;
+			void set_h245_ports(rtpx::port_range_ptr ports);
+			rtpx::port_range_ptr h245_ports()const;
 
-			void set_rtp_ports(litertp::port_range_ptr ports);
-			litertp::port_range_ptr rtp_ports()const;
+			void set_rtp_ports(rtpx::port_range_ptr ports);
+			rtpx::port_range_ptr rtp_ports()const;
+
+			spdlogger_ptr logger()const { return log_; }
 
 			void set_max_bitrate(int v);
 			int max_bitrate()const;
@@ -103,8 +105,8 @@ namespace voip
 
 			spdlogger_ptr log_;
 			PStringArray media_crypto_suites_;
-			litertp::port_range_ptr h245_ports_;
-			litertp::port_range_ptr rtp_ports_;
+			rtpx::port_range_ptr h245_ports_;
+			rtpx::port_range_ptr rtp_ports_;
 
 			std::recursive_mutex calls_mutex_;
 			std::vector<std::shared_ptr<h323_call>> calls_;

@@ -225,7 +225,11 @@ namespace rtpx {
 				itr->rtp_address = this->address;
 				itr->has_rtp_address = true;
 			}
-			if (!itr->has_rtcp)
+
+			// 注意：sdp_media::rtcp_port 的成员默认值是 9（RFC 8866 的占位端口），
+			// 不能用 ==0 判断是否声明了 a=rtcp，需以 has_rtcp 为准
+			bool has_explicit_rtcp = itr->has_rtcp;
+			if (!has_explicit_rtcp)
 			{
 				itr->rtcp_network_type = this->network_type;
 				itr->rtcp_address_type = this->address_type;
@@ -233,12 +237,26 @@ namespace rtpx {
 				itr->has_rtcp = true;
 			}
 
-			if (itr->rtcp_port == 0&& itr->rtp_port!=0&& itr->rtp_port!=9)
+			// RFC 3550：未声明 a=rtcp 时，RTCP 端口按惯例取 RTP 端口（rtcp-mux）或 RTP+1。
+			// 否则 rtcp_port 停留在占位端口 9，RTCP 会被发往对端的 discard 端口
+			if ((!has_explicit_rtcp || itr->rtcp_port == 0) && itr->rtp_port != 0 && itr->rtp_port != 9)
 			{
 				if (itr->rtcp_mux)
 					itr->rtcp_port = itr->rtp_port;
 				else
 					itr->rtcp_port = itr->rtp_port+1;
+			}
+
+			// RTP 承载的应用媒体（如 H.239 的 H.224）：fmt 是 payload type，
+			// 解析完成后以 rtpmap 的格式名作为 app_data_type（如 "H224"）
+			if (itr->media_type == media_type_application && itr->rtpmap.size() > 0)
+			{
+				bool numeric_or_empty = itr->app_data_type.empty() || itr->app_data_type == "*"
+					|| (itr->app_data_type[0] >= '0' && itr->app_data_type[0] <= '9');
+				if (numeric_or_empty)
+				{
+					itr->app_data_type = itr->rtpmap.begin()->second.get_codec();
+				}
 			}
 
 

@@ -59,11 +59,11 @@ namespace voip
 
 			h323_call(endpoint_ptr ep, tcp_socket_ptr h225_skt, const std::string& local_alias, const std::string& remote_alias, direction_t direction,
 				const std::string& nat_address, int port,
-				litertp::port_range_ptr h245_ports, litertp::port_range_ptr rtp_ports);
+				rtpx::port_range_ptr h245_ports, rtpx::port_range_ptr rtp_ports);
 
 			h323_call(endpoint_ptr ep,const asio::ip::tcp::endpoint& h225_addr, const std::string& local_alias, const std::string& remote_alias, direction_t direction,
 				const std::string& nat_address, int port,
-				litertp::port_range_ptr h245_ports, litertp::port_range_ptr rtp_ports);
+				rtpx::port_range_ptr h245_ports, rtpx::port_range_ptr rtp_ports);
 
 			~h323_call();
 
@@ -105,8 +105,11 @@ namespace voip
 			bool get_local_channel(int chann_num, media_channel_t& chann);
 			bool get_remote_channel(int chann_num, media_channel_t& chann);
 
-			litertp::media_stream_ptr get_media_stream(media_type_t mt,const std::string& mid);
+			rtpx::media_stream_ptr get_media_stream(media_type_t mt,const std::string& mid);
 			bool remove_media_stream(const std::string& mid);
+
+			// sockaddr_storage 转 asio udp endpoint（H.245 通告的对端媒体地址）
+			static asio::ip::udp::endpoint sockaddr_to_endpoint(const sockaddr_storage& addr);
 
 			bool has_h239_control();
 			bool find_extend_video(media_channel_t& remote,media_channel_t& local);
@@ -166,9 +169,6 @@ namespace voip
 			bool send_h239_presentation_owner(unsigned logical_channel, unsigned terminal_label);
 		private:
 			void fill_capability(H245_ArrayOf_CapabilityTableEntry& entries, H245_ArrayOf_CapabilityDescriptor& descs);
-
-			static void s_litertp_on_require_keyframe(void* ctx, uint32_t ssrc, uint32_t ssrc_media);
-
 
 			void on_h225_tpkt(const PBYTEArray& tpkt);
 			void on_h245_tpkt(const PBYTEArray& tpkt);
@@ -245,7 +245,7 @@ namespace voip
 			asio::ip::tcp::endpoint h245_connect_ep_;
 			bool h245_tunneling = false;
 			uint32_t call_ref_ = 0;
-			litertp::port_range_ptr h245_ports_;
+			rtpx::port_range_ptr h245_ports_;
 			
 
 			PGloballyUniqueID call_id_;

@@ -36,6 +36,10 @@ namespace rtpx
 		void set_codec(const std::string& codec);
 		const std::string get_codec()const;
 
+		// 编码与参数兼容性比较：codec、采样率、packetization-mode、profile、level
+		// （与 sdp_media::negotiate 的匹配规则一致）
+		bool is_compatible_with(const sdp_format& other)const;
+
 		//bool extract_h264_fmtp(int* level_asymmetry_allowed, int* packetization_mode, int64_t* profile_level_id)const;
 	public:
 		uint8_t pt = 128;

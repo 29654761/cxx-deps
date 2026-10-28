@@ -52,8 +52,10 @@ namespace voip
 			void set_user_agent(const std::string& user_agent);
 			const std::string& user_agent()const;
 
-			void set_rtp_ports(litertp::port_range_ptr ports);
-			litertp::port_range_ptr rtp_ports()const;
+			void set_rtp_ports(rtpx::port_range_ptr ports);
+			rtpx::port_range_ptr rtp_ports()const;
+
+			spdlogger_ptr logger()const { return log_; }
 			
 			void set_max_bitrate(int v);
 			int max_bitrate()const;
@@ -145,7 +147,7 @@ namespace voip
 			std::string user_agent_ = "RTC VOIP SDK";
 			int port_ = 5060;
 
-			litertp::port_range_ptr rtp_ports_;
+			rtpx::port_range_ptr rtp_ports_;
 			spdlogger_ptr log_;
 
 			bool incoming_audio_ = true;

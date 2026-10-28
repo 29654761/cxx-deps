@@ -14,7 +14,7 @@ namespace voip
 		public:
 			friend endpoint;
 			sip_call(endpoint_ptr ep,sip_connection_ptr con, const std::string& local_alias, const std::string& remote_alias, direction_t direction,
-				const std::string& nat_address, int port, litertp::port_range_ptr rtp_ports);
+				const std::string& nat_address, int port, rtpx::port_range_ptr rtp_ports);
 			~sip_call();
 
 			bool set_invite(const sip_message& invite);
@@ -55,16 +55,13 @@ namespace voip
 
 			
 		private:
-			bool add_audio_channel_g711();
-			bool add_audio_channel_g711(uint32_t ssrc, int rtp_port, int rtcp_port);
-			// 在音频流上声明 telephone-event（RFC 4733 按键事件）。
-			// remote_offer 为对端 offer（作为应答方时传入，沿用其 PT；对端没带则不声明），发起方传 nullptr 使用 101/8000。
-			bool add_telephone_event(const litertp::sdp* remote_offer);
-			bool add_video_channel_h264();
-			bool add_video_channel_h264(uint32_t ssrc, int rtp_port, int rtcp_port);
-			bool add_video_channel_h265();
-			bool add_video_channel_h265(uint32_t ssrc, int rtp_port, int rtcp_port);
-			bool add_extend_video_channel_h264();
+			// 从全局能力集（rtpx::media_capabilities::global()）创建媒体流并生成 send 格式，
+			// offer 的 rtpmap 即能力集内容；应答方向的格式交集过滤由 rtpx 在 set_remote_sdp 内完成
+			bool add_audio_channel();
+			bool add_video_channel();
+		private:
+			// 生成发给对端的 SDP 收尾处理：剥离 UDP 前缀、填充本端地址端口、补充带宽与方向信息
+			void postprocess_local_sdp(rtpx::sdp& sdp);
 		private:
 			bool invite();
 			bool invite_rsp(const sip_message& invite, const std::string& sdp);
