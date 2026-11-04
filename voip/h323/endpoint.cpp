@@ -247,6 +247,7 @@ namespace voip
 			callptr->set_logger(log_);
 			callptr->setup(purl,call_id,conf_id,call_ref);
 			callptr->set_max_bitrate(max_bitrate());
+			callptr->set_content_support(content_support_);
 			add_call(callptr);
 			return callptr;
 		}
@@ -328,6 +329,7 @@ namespace voip
 				callptr->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, std::placeholders::_7));
 				callptr->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1,std::placeholders::_2));
 				callptr->set_max_bitrate(max_bitrate());
+				callptr->set_content_support(content_support_);
 				callptr->set_on_facility_event(std::bind(&endpoint::handle_facility, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 				add_call(callptr);
 				if (callptr->start(incoming_audio_, incoming_video_, use_rtp_address_))
@@ -615,6 +617,7 @@ namespace voip
 			auto rtp = rtp_ports();
 			auto callptr = std::make_shared<voip::h323::h323_call>(self,skt, (const std::string&)alias,"", voip::call::direction_t::outgoing, (const std::string&)nat, port_, h245, rtp);
 			callptr->set_max_bitrate(max_bitrate());
+			callptr->set_content_support(content_support_);
 			callptr->set_logger(log_);
 			callptr->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, std::placeholders::_7));
 			callptr->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1,std::placeholders::_2));

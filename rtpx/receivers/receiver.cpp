@@ -82,7 +82,33 @@ namespace rtpx
 
 		if (sn::ahead_of<uint16_t>(begin_seq_, pkt->header()->seq))
 		{
-			reset_ = true;
+			// 窗口起点之前的包＝NACK 重传的旧包或乱序重复包，直接忽略；
+			// 无条件置 reset_ 会与重传形成死循环（重传旧包→清缓冲→组帧失败→再请求→再重传）。
+			// 但对端流重启后 seq 可能回退到窗口起点之前，不能永远丢弃：
+			// 前向插入停顿超过 1 秒且持续收到旧包（≥20 个）时判定为流重启，重建接收窗口
+			uint16_t diff = (uint16_t)(begin_seq_ - pkt->header()->seq);
+			if (diff >= 0x4000)
+			{
+				reset_ = true;
+			}
+			else
+			{
+				behind_count_++;
+				if (behind_count_ >= 20 && sys::util::cur_time_db() - last_forward_insert_ > 1.0)
+				{
+					if (log_)
+					{
+						log_->warn("Stream restart detected: {} packets behind window (seq={}, begin={}), reset receiver buffer",
+							behind_count_, pkt->header()->seq, begin_seq_)->flush();
+					}
+					behind_count_ = 0;
+					reset_ = true;   // 走下方 reset 分支重建窗口并正常插入本包
+				}
+				else
+				{
+					return false;
+				}
+			}
 		}
 
 
@@ -103,6 +129,9 @@ namespace rtpx
 				log_->trace("Reset rtp packet buffer")->flush();
 			}
 		}
+
+		behind_count_ = 0;
+		last_forward_insert_ = sys::util::cur_time_db();
 
 
 
@@ -299,15 +328,17 @@ namespace rtpx
 		stats = stats_;
 	}
 
+	// FIR/PLI 只是"向对端请求关键帧"的计数，绝不能复位接收缓冲：
+	// 置 reset_ 会让下一个到达的包清空 recv_packs_，把正在组装的帧连同 PLI 应答的重传包
+	// 一起砸掉，形成"请求关键帧→清缓冲→组不出帧→再请求"的死循环。
+	// 与 process_nack 里的结论一致：reset 清空缓冲会错过 I 帧。
 	void receiver::increase_fir()
 	{
 		fir_count_++;
-		reset_ = true;
 	}
 	void receiver::increase_pli()
 	{
 		pli_count_++;
-		reset_ = true;
 	}
 
 	void receiver::increase_nack()

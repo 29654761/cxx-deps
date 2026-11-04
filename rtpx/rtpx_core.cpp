@@ -432,7 +432,7 @@ namespace rtpx {
 			return nullptr;
 		}
 		udp.set_option(asio::socket_base::send_buffer_size(1024 * 1024), ec);
-		udp.set_option(asio::socket_base::send_buffer_size(1024 * 1024), ec);
+		udp.set_option(asio::socket_base::receive_buffer_size(1024 * 1024), ec);
 		udp.bind(ep, ec);
 		if (ec)
 		{

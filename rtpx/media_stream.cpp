@@ -284,6 +284,18 @@ namespace rtpx {
 	}
 
 
+	void media_stream::set_content(const std::string& v)
+	{
+		std::unique_lock<std::shared_mutex> lk(local_mutex_);
+		content_ = v;
+	}
+
+	void media_stream::set_label(const std::string& v)
+	{
+		std::unique_lock<std::shared_mutex> lk(local_mutex_);
+		label_ = v;
+	}
+
 	bool media_stream::create_offer(sdp_media& sdp)
 	{
 		std::shared_lock<std::shared_mutex> lk(local_mutex_);
@@ -324,6 +336,18 @@ namespace rtpx {
 			remote_rtx_ssrc_ = sdp.ssrcs[1].ssrc;
 		}
 		remote_setup_ = sdp.setup;
+
+		// RFC 4796/4574：捕获对端 m 行的 content/label（如辅流 a=content:slides a=label:12），
+		// 生成 answer 时回带；对端未携带时不覆盖本地已有设置
+		if (sdp.has_attribute("content"))
+		{
+			content_ = sdp.get_attribute("content", "");
+		}
+		if (sdp.has_attribute("label"))
+		{
+			label_ = sdp.get_attribute("label", "");
+		}
+
 		if (remote_setup_ == sdp_setup_none && (security_ || sdp.is_security()))
 		{
 			// DTLS 场景必须协商 setup；纯 RTP/AVP（如 SIP、H.323、RTSP）的 SDP 通常没有 a=setup，容忍缺失
@@ -739,6 +763,16 @@ namespace rtpx {
 			local_sdp.msid_sid = msid_sid_;
 			local_sdp.msid_tid = msid_tid_;
 			local_sdp.rtcp_rsize = true;
+
+			// RFC 4796 content / RFC 4574 label：offer 输出本地设置，answer 回带对端 offer 的取值
+			if (!content_.empty())
+			{
+				local_sdp.attrs.push_back(sdp_pair("content", content_, ":"));
+			}
+			if (!label_.empty())
+			{
+				local_sdp.attrs.push_back(sdp_pair("label", label_, ":"));
+			}
 		}
 		
 		local_sdp.fingerprint = this->rtp_transport_->fingerprint();
@@ -1782,6 +1816,18 @@ namespace rtpx {
 
 	bool media_stream::receive_rtp_packet(const packet_ptr& packet, const asio::ip::udp::endpoint& endpoint)
 	{
+		if (!inbound_logged_.exchange(true))
+		{
+			// 一次性诊断日志：证明包已正确路由到本流；若此日志出现而 on_frame 仍无回调，
+			// 问题在接收器/格式匹配层（配合 "No receiver for pt=" 定位）
+			if (log_)
+			{
+				auto rip = endpoint.address().to_string();
+				log_->info("Media stream mid={} first inbound RTP: pt={}, ssrc={}, from {}:{}",
+					mid_, (int)packet->header()->pt, packet->header()->ssrc, rip, endpoint.port())->flush();
+			}
+		}
+
 		auto receiver = get_receiver(packet->header()->pt);
 		if (!receiver)
 		{

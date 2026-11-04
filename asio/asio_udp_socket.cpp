@@ -96,17 +96,21 @@ namespace asio
 
 		auto self = shared_from_this();
 
-		data_received_handler handler;
+		// 出错（如 WSAECONNRESET/中断）时不把 0 字节的陈旧缓冲交给上层，仅继续接收
+		if (!ec && bytes > 0)
 		{
-			std::shared_lock<std::shared_mutex> lk(handler_mutex_);
-			if (data_received_handler_)
+			data_received_handler handler;
 			{
-				handler = data_received_handler_;
+				std::shared_lock<std::shared_mutex> lk(handler_mutex_);
+				if (data_received_handler_)
+				{
+					handler = data_received_handler_;
+				}
 			}
-		}
-		if (handler)
-		{
-			handler(self, buffer_.data(), bytes, *ep.get());
+			if (handler)
+			{
+				handler(self, buffer_.data(), bytes, *ep.get());
+			}
 		}
 
 		socket_.async_receive_from(asio::buffer(buffer_), *ep.get(),

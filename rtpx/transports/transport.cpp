@@ -212,6 +212,17 @@ namespace rtpx
 	void transport::received_message(const uint8_t* buffer, size_t size, const asio::ip::udp::endpoint& endpoint)
 	{
 		update_.update();
+		if (!inbound_logged_.exchange(true))
+		{
+			// 一次性诊断日志：证明/证伪"socket 是否收到数据"。若此日志不出现，
+			// 说明报文没有到达进程（防火墙/地址族/目标 IP 问题），与库内处理无关
+			if (log_ && size > 0)
+			{
+				auto rip = endpoint.address().to_string();
+				log_->info("Transport udp:{} first inbound datagram: {} bytes from {}:{}, b0={:#04x}",
+					local_port_, size, rip, endpoint.port(), buffer[0])->flush();
+			}
+		}
 		auto proto = detect_message(buffer[0]);
 		if (proto == proto_rtp)
 		{

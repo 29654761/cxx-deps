@@ -140,6 +140,18 @@ namespace voip
 		if (is_extend)
 		{
 			ms = rtp_->get_media_stream_by_mid("extend_video");
+			if (!ms)
+			{
+				// 应答方的流 mid 来自对端 offer，辅流不一定叫 "extend_video"，按 RFC 4796 content 标记兜底
+				for (auto& m : rtp_->media_streams())
+				{
+					if (m->media_type() == media_type_video && m->content() == "slides")
+					{
+						ms = m;
+						break;
+					}
+				}
+			}
 		}
 		else
 		{
@@ -149,7 +161,7 @@ namespace voip
 				// 应答方的流 mid 来自对端 offer，不一定叫 "video"，按媒体类型兜底
 				for (auto& m : rtp_->media_streams())
 				{
-					if (m->media_type() == media_type_video)
+					if (m->media_type() == media_type_video && m->content() != "slides")
 					{
 						ms = m;
 						break;
@@ -159,6 +171,10 @@ namespace voip
 		}
 		if (!ms)
 		{
+			if (log_)
+			{
+				log_->warn("send_video_frame failed: media stream not found, is_extend={}", is_extend)->flush();
+			}
 			return false;
 		}
 		uint8_t pt = 0;
@@ -199,9 +215,10 @@ namespace voip
 		if (on_frame)
 		{
 			auto self = shared_from_this();
-			bool extend = (mid == "extend_video");
 			uint32_t ssrc = 0;
 			auto ms = rtp_->get_media_stream_by_mid(mid);
+			// 应答方流的 mid 来自对端 offer，辅流不一定叫 "extend_video"，按 content 标记兜底
+			bool extend = (mid == "extend_video") || (ms && ms->content() == "slides");
 			if (ms)
 			{
 				ssrc = ms->remote_rtp_ssrc();

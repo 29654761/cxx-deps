@@ -31,6 +31,9 @@ namespace rtpx
 
 		bool combin_frame(const std::vector<packet_ptr>& pkts);
 
+		// FU-A 分片首包缺失只记一次日志的标记
+		bool fu_start_missing_logged_ = false;
+
 	
 	};
 

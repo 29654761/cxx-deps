@@ -520,6 +520,64 @@ namespace rtpx {
 		return ms;
 	}
 
+	uint16_t rtp_session::allocate_udp_port()
+	{
+		port_range& ports = usable_ports();
+		for (int i = 0; i < ports.count() + 1; i++)
+		{
+			uint16_t port = allocate_port(false);
+			if (port == 0)
+			{
+				return 0;
+			}
+			std::lock_guard<std::mutex> lk(reserved_ports_mutex_);
+			if (reserved_ports_.insert(port).second)
+			{
+				return port;
+			}
+		}
+		return 0;
+	}
+
+	void rtp_session::release_port(uint16_t port)
+	{
+		std::lock_guard<std::mutex> lk(reserved_ports_mutex_);
+		reserved_ports_.erase(port);
+	}
+
+	std::vector<uint16_t> rtp_session::transport_ports() const
+	{
+		std::vector<uint16_t> vec;
+		auto tps = transports();
+		vec.reserve(tps.size());
+		for (auto& tp : tps)
+		{
+			vec.push_back(tp->local_port());
+		}
+		return vec;
+	}
+
+	uint16_t rtp_session::allocate_port(bool even)
+	{
+		port_range& ports = usable_ports();
+		for (int i = 0; i < ports.count() + 1; i++)
+		{
+			uint16_t port = even ? ports.get_next_even_port() : ports.get_next_port();
+			{
+				std::lock_guard<std::mutex> lk(reserved_ports_mutex_);
+				if (reserved_ports_.count(port) > 0)
+				{
+					continue;
+				}
+			}
+			if (!get_transport(port))
+			{
+				return port;
+			}
+		}
+		return 0;
+	}
+
 	transport_ptr rtp_session::create_transport(uint16_t port, bool security)
 	{
 		auto tp = get_transport(port);
@@ -670,7 +728,11 @@ namespace rtpx {
 			{
 				for (int i = 0; i < ports.count(); i++)
 				{
-					uint16_t port = ports.get_next_port();
+					uint16_t port = allocate_port(false);
+					if (port == 0)
+					{
+						break;
+					}
 					auto tp = create_transport(port, security);
 					if (tp)
 					{
@@ -690,7 +752,11 @@ namespace rtpx {
 			{
 				for (int i = 0; i < ports.count(); i++)
 				{
-					uint16_t port = ports.get_next_port();
+					uint16_t port = allocate_port(false);
+					if (port == 0)
+					{
+						break;
+					}
 					auto tp = create_transport(port, security);
 					if (!tp)
 					{
@@ -706,7 +772,11 @@ namespace rtpx {
 			{
 				for (int i = 0; i < ports.count(); i++)
 				{
-					uint16_t port = ports.get_next_even_port();
+					uint16_t port = allocate_port(true);
+					if (port == 0)
+					{
+						break;
+					}
 					auto tp = create_transport(port, security);
 					if (!tp)
 					{
@@ -753,7 +823,11 @@ namespace rtpx {
 			{
 				for (int i = 0; i < ports.count(); i++)
 				{
-					uint16_t port = ports.get_next_port();
+					uint16_t port = allocate_port(false);
+					if (port == 0)
+					{
+						break;
+					}
 					auto tp = create_transport(port, security, sender);
 					if (tp)
 					{
@@ -771,7 +845,11 @@ namespace rtpx {
 		{
 			for (int i = 0; i < ports.count(); i++)
 			{
-				uint16_t port = ports.get_next_even_port();
+				uint16_t port = allocate_port(true);
+				if (port == 0)
+				{
+					break;
+				}
 				auto tp = create_transport(port, security, sender);
 				if (!tp)
 				{
@@ -820,12 +898,14 @@ namespace rtpx {
 
 	void rtp_session::handle_rtp_packet(uint16_t local_port, packet_ptr pkt, const asio::ip::udp::endpoint& ep)
 	{
-		auto ms=this->get_media_stream_by_remote_ssrc(pkt->header()->ssrc);
+		// RFC 3550：RTP 会话由传输地址（端口对）定义，SSRC 只是会话内的同步源标识。
+		// 端口唯一命中时按端口路由（权威）：SIP/H.323/RTSP 每条流独立端口对，且网关设备
+		// 常在 a=ssrc 上错标/复用值，SSRC 优先会把包误喂给错误的流。
+		// 端口无法区分流时（BUNDLE 共享端口，命中 0 个或多个），退回按对端 SSRC 匹配
+		auto ms = this->get_media_stream_by_local_port(local_port, true);
 		if (!ms)
 		{
-			// RFC 3550：RTP 会话由传输地址（端口对）定义。SIP/H.323/RTSP 不交换对端 SSRC
-			//（H.245 没有 SSRC 字段），此时按本地端口路由，之后由首个收到的 RTP 包学习对端 SSRC
-			ms = this->get_media_stream_by_local_port(local_port, true);
+			ms = this->get_media_stream_by_remote_ssrc(pkt->header()->ssrc);
 		}
 		if (ms)
 		{
@@ -875,10 +955,11 @@ namespace rtpx {
 
 	void rtp_session::handle_rtcp_app(uint16_t local_port, const rtcp_app* app, const asio::ip::udp::endpoint& endpoint)
 	{
-		auto ms = this->get_media_stream_by_remote_ssrc(app->ssrc);
+		// 与 handle_rtp_packet 一致：端口唯一命中优先，BUNDLE 共享端口时按对端 SSRC 兜底
+		auto ms = this->get_media_stream_by_local_port(local_port, false);
 		if (!ms)
 		{
-			ms = this->get_media_stream_by_local_port(local_port, false);
+			ms = this->get_media_stream_by_remote_ssrc(app->ssrc);
 		}
 		if (ms)
 		{
@@ -888,10 +969,10 @@ namespace rtpx {
 
 	void rtp_session::handle_rtcp_bye(uint16_t local_port, uint32_t ssrc, const char* reason, const asio::ip::udp::endpoint& endpoint)
 	{
-		auto ms = this->get_media_stream_by_remote_ssrc(ssrc);
+		auto ms = this->get_media_stream_by_local_port(local_port, false);
 		if (!ms)
 		{
-			ms = this->get_media_stream_by_local_port(local_port, false);
+			ms = this->get_media_stream_by_remote_ssrc(ssrc);
 		}
 		if (ms)
 		{
@@ -907,10 +988,12 @@ namespace rtpx {
 	void rtp_session::handle_rtcp_sr(uint16_t local_port, const rtcp_sr* sr, const asio::ip::udp::endpoint& endpoint)
 	{
 		update_.update();
-		auto ms = this->get_media_stream_by_remote_ssrc(sr->ssrc);
+		// SR 需按其归属流处理（其中 §6.4.1 的 SSRC 采纳逻辑依赖流身份正确），
+		// 端口唯一命中优先，BUNDLE 时按 SSRC 兜底
+		auto ms = this->get_media_stream_by_local_port(local_port, false);
 		if (!ms)
 		{
-			ms = this->get_media_stream_by_local_port(local_port, false);
+			ms = this->get_media_stream_by_remote_ssrc(sr->ssrc);
 		}
 		if (ms)
 		{
@@ -933,11 +1016,11 @@ namespace rtpx {
 
 	void rtp_session::handle_rtcp_sdes(uint16_t local_port, const rtcp_sdes_entry* entry, const asio::ip::udp::endpoint& endpoint)
 	{
-		// SDES 块的 ssrc 是发送方（对端）的 SSRC，按对端 SSRC 查找，查不到按端口兜底
-		auto ms = this->get_media_stream_by_remote_ssrc(entry->id);
+		// SDES 块的 ssrc 是发送方（对端）的 SSRC：端口唯一命中优先，BUNDLE 时按 SSRC 兜底
+		auto ms = this->get_media_stream_by_local_port(local_port, false);
 		if (!ms)
 		{
-			ms = this->get_media_stream_by_local_port(local_port, false);
+			ms = this->get_media_stream_by_remote_ssrc(entry->id);
 		}
 		if (ms)
 		{
@@ -947,8 +1030,13 @@ namespace rtpx {
 
 	void rtp_session::handle_rtcp_fb(uint16_t local_port, const rtcp_fb* fb, const asio::ip::udp::endpoint& endpoint)
 	{
-		// ssrc_media 是对端反馈的目标（我方发送流），按本地 SSRC 查找
+		// ssrc_media 是对端反馈的目标（我方发送流），按本地 SSRC 查找；
+		// 对端回填错 SSRC 时按到达端口兜底
 		auto ms = this->get_media_stream_by_local_ssrc(fb->ssrc_media);
+		if (!ms)
+		{
+			ms = this->get_media_stream_by_local_port(local_port, false);
+		}
 		if (ms)
 		{
 			ms->receive_rtcp_feedback(fb,endpoint);

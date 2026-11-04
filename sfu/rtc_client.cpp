@@ -530,6 +530,7 @@ void rtc_client::s_rtc_track_event_callback(
 		});
 		
 	}
+
 	p->track_event.invoke(uid, track_info, event_type);
 }
 

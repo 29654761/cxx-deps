@@ -69,6 +69,11 @@ namespace voip
 
 			void set_gk_client(std::shared_ptr<gk_client> gkclient) { gkclient_ = gkclient; }
 
+			// 辅流（H.239）支持开关：开启后视频呼叫在 TCS 能力集中附加 extend_video 通道与
+			// h239 控制通道（与 sip 侧 BFCP 的 set_content_support 对应）。须在 start() 之前设置
+			void set_content_support(bool support) { content_support_ = support; }
+			bool content_support()const { return content_support_; }
+
 			virtual std::string id()const;
 			virtual bool start(bool audio, bool video, bool use_rtp_address);
 			virtual void stop(voip::call::reason_code_t reason);
@@ -277,9 +282,11 @@ namespace voip
 			unsigned h239_symmetry_breaking_ = 0;
 			unsigned h239_token_channel_ = 0;
 			unsigned h239_terminal_label_ = 0;
+			bool content_support_ = false;              // 辅流（H.239）支持开关
 			unsigned mcu_number_ = 0;
 			unsigned terminal_number_ = 0;
 			bool h239_token_owned_ = false;
+			bool h239_remote_owned_ = false;            // 对端持有令牌（我方已 ack 对端请求或收到 OwnerIndication）
 
 			bool tcs_ready_ = false;   //terminal_capability 是否完成, tcs交互只需要收到对方的能力集就可以进行推流了，不需要等双方完成
 			bool msd_sent_ = false;   //对方已经回复了master_slave_determination_ack, 表示我已经发送成功

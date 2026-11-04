@@ -126,16 +126,9 @@ namespace rtpx
 				continue;
 			}
 
-			//h264::nal_header_t fui = { 0 };
-			//h264::nal_header_set(&fui, pkt->payload()[0]);
-
-			//if (fui.nri > 0)  // nal ref idc
-			//{
-			//	waiting_for_keyframe_ = true;
-			//}
 			if (log_)
 			{
-				log_->warn("H264 Drop rtp packet seq={}",i)->flush();
+				log_->warn("AV1 Drop rtp packet seq={}",i)->flush();
 			}
 			recv_packs_[idx].reset();
 

@@ -83,6 +83,65 @@ namespace voip
 			return fmts.size() > 0;
 		}
 
+		bool sip_call::add_extend_video_channel()
+		{
+			// BFCP 声明需要本地端口，先绑定；失败则不建辅流，避免 offer 出现无 BFCP 的孤行
+			if (!bind_bfcp_socket())
+			{
+				return false;
+			}
+
+			// 辅流视频（对应 h323 的 extend_video 通道）：mid 固定为 extend_video，
+			// call::send_video_frame(is_extend=true) 按此 mid 发送辅流
+			auto ms = rtp_->create_media_stream(media_type_video, "extend_video", false, "", "", rtp_trans_mode_sendrecv, false);
+			if (!ms) {
+				// 端口范围不足以再建一对时释放 BFCP socket，避免孤儿绑定占用端口
+				bfcp_->stop();
+				rtp_->release_port(bfcp_->local_port());
+				bfcp_.reset();
+				return false;
+			}
+			ms->use_rtp_endpoint(use_rtp_address_);
+			ms->use_rtcp_endpoint(use_rtp_address_);
+			// RFC 4796/4574：标记本行为辅流，label 与 BFCP 行的 mstrm 对应
+			ms->set_content("slides");
+			ms->set_label(std::to_string(bfcp_mstrm_));
+			auto fmts = rtpx::media_capabilities::global().formats(media_type_video);
+			for (auto fmt : fmts)
+			{
+				// 辅流带宽为主视频的一半，避免挤占主流
+				fmt.fmtp.set_mbr(max_bitrate_ / 2);
+				ms->add_local_format(fmt);
+			}
+
+			// BFCP application 行声明（RFC 4583）：floorid:2 mstrm:<label> 与 extend_video 的 a=label 关联
+			bfcp_media_ = rtpx::sdp_media();
+			bfcp_media_.media_type = media_type_application;
+			bfcp_media_.protos = { "UDP", "BFCP" };
+			bfcp_media_.app_data_type = "*";
+			bfcp_media_.mid = "bfcp";
+			bfcp_media_.has_rtp_address = true;
+			bfcp_media_.rtp_address = nat_address_;
+			bfcp_media_.rtcp_address = nat_address_;
+			bfcp_media_.rtp_port = bfcp_->local_port();
+			bfcp_media_.rtcp_port = bfcp_->local_port();
+			bfcp_media_.trans_mode = rtp_trans_mode_sendrecv;
+			bfcp_media_.attrs.push_back(rtpx::sdp_pair("floorctrl", "c-s", ":"));
+			bfcp_media_.attrs.push_back(rtpx::sdp_pair("userid", std::to_string(bfcp_user_id_), ":"));
+			bfcp_media_.attrs.push_back(rtpx::sdp_pair("confid", std::to_string(bfcp_conference_id_), ":"));
+			bfcp_media_.attrs.push_back(rtpx::sdp_pair("floorid",
+				std::to_string(bfcp_floor_id_) + " mstrm:" + std::to_string(bfcp_mstrm_), ":"));
+
+			if (fmts.size() == 0)
+			{
+				bfcp_->stop();
+				rtp_->release_port(bfcp_->local_port());
+				bfcp_.reset();
+				return false;
+			}
+			return true;
+		}
+
 		void sip_call::postprocess_local_sdp(rtpx::sdp& sdp)
 		{
 			sdp.bundle = false;
@@ -92,7 +151,20 @@ namespace voip
 			{
 				if (itr->media_type == media_type_application)
 				{
-					// 不支持的应用媒体（BFCP/H.224 等）：rtpx 已按 RFC 3264 输出端口 0 的拒绝行，保持原样
+					// BFCP 行协商成功：改写为本端 BFCP 服务地址并补充属性（否则保持 RFC 3264 拒绝行）
+					if (bfcp_negotiated_ && itr->app_data_type == "BFCP" && bfcp_)
+					{
+						itr->rtp_address = nat_address_;
+						itr->rtcp_address = nat_address_;
+						itr->rtp_port = bfcp_->local_port();
+						itr->rtcp_port = bfcp_->local_port();
+						itr->attrs.clear();
+						itr->attrs.push_back(rtpx::sdp_pair("floorctrl", "c-s", ":"));
+						itr->attrs.push_back(rtpx::sdp_pair("userid", std::to_string(bfcp_user_id_), ":"));
+						itr->attrs.push_back(rtpx::sdp_pair("confid", std::to_string(bfcp_conference_id_), ":"));
+						itr->attrs.push_back(rtpx::sdp_pair("floorid",
+							std::to_string(bfcp_floor_id_) + " mstrm:" + std::to_string(bfcp_mstrm_), ":"));
+					}
 					continue;
 				}
 				itr->protos.erase("UDP");
@@ -162,6 +234,11 @@ namespace voip
 						stop(call::reason_code_t::error);
 						return false;
 					}
+					// 辅流支持：offer 带第二条 video（mid=extend_video，a=content:slides）与 BFCP application 行
+					if (content_support_ && !add_extend_video_channel())
+					{
+						content_support_ = false;
+					}
 				}
 
 				if (!invite())
@@ -213,6 +290,7 @@ namespace voip
 				return;
 
 			rtp_->stop();
+			stop_bfcp();
 			std::error_code ec;
 			timer_.cancel(ec);
 
@@ -251,6 +329,12 @@ namespace voip
 		{
 			rtp_->require_keyframe();
 			return true;
+		}
+
+		bool sip_call::require_keyframe(const std::string& mid)
+		{
+			// rtp_session 已支持按 mid 只对单条视频流发 PLI，避免波及其他视频流
+			return rtp_->require_keyframe(mid);
 		}
 
 		bool sip_call::set_invite(const sip_message& invite)
@@ -293,6 +377,9 @@ namespace voip
 				}
 				return false;
 			}
+
+			// 对端 offer 携带 BFCP 行时启用辅流协商（自适应，无需本端开关）
+			start_bfcp(remote_sdp);
 
 			rtpx::sdp sdp;
 			if (!rtp_->create_answer(sdp))
@@ -339,11 +426,53 @@ namespace voip
 
 		bool sip_call::request_presentation_role()
 		{
-			return false;
+			if (!bfcp_ || !bfcp_negotiated_ || bfcp_owned_ || bfcp_pending_)
+			{
+				return false;
+			}
+			uint16_t tid = make_bfcp_transaction_id();
+			bfcp_pending_transaction_ = tid;
+			bfcp_pending_ = true;
+			// FloorRequest = 我方请求辅流令牌（对齐 h323 send_h239_presentation_request）
+			bfcp_->send(bfcp::build_floor_request(bfcp_conference_id_, tid, bfcp_user_id_, bfcp_floor_id_, bfcp_user_id_));
+			return true;
 		}
-		void sip_call::release_presentation_role(){}
-		bool sip_call::has_presentation_role() {
-			return false;
+
+		void sip_call::release_presentation_role()
+		{
+			if (!bfcp_ || !bfcp_negotiated_)
+			{
+				return;
+			}
+			if (!bfcp_owned_ && !bfcp_pending_)
+			{
+				return;
+			}
+			// FloorRelease 释放令牌/取消进行中的请求（RFC 4582 §10.2）
+			if (bfcp_floor_request_id_ > 0)
+			{
+				uint16_t tid = make_bfcp_transaction_id();
+				bfcp_->send(bfcp::build_floor_release(bfcp_conference_id_, tid, bfcp_user_id_, bfcp_floor_request_id_));
+			}
+			bfcp_owned_ = false;
+			bfcp_pending_ = false;
+			bfcp_pending_transaction_ = 0;
+			// 对齐 h323 release 回调语义：(was_owner=true, active=false)
+			on_bfcp_presentation_role_changed(true, false);
+		}
+
+		bool sip_call::has_presentation_role()
+		{
+			return bfcp_owned_;
+		}
+
+		void sip_call::on_bfcp_presentation_role_changed(bool owned, bool active)
+		{
+			if (on_presentation_role_changed)
+			{
+				auto self = shared_from_this();
+				on_presentation_role_changed(self, owned, active);
+			}
 		}
 
 		bool sip_call::remote_addr(std::string& ip, int& port)
@@ -396,6 +525,9 @@ namespace voip
 				}
 				return;
 			}
+
+			// re-INVITE 携带/变更 BFCP 行时更新协商
+			start_bfcp(sdp);
 
 			rtpx::sdp answer;
 			if (!rtp_->create_answer(answer))
@@ -650,6 +782,8 @@ namespace voip
 				{
 					ensure_setup(sdp, sdp_type_answer);
 					rtp_->set_remote_sdp(sdp, sdp_type_answer);
+					// 对端 answer 的 BFCP 行携带其服务端地址，完成辅流协商
+					start_bfcp(sdp);
 				}
 				auto self = shared_from_this();
 				for (auto itr = sdp.medias.begin(); itr != sdp.medias.end(); itr++)
@@ -724,6 +858,11 @@ namespace voip
 				return false;
 			}
 			postprocess_local_sdp(sdp);
+			if (content_support_ && bfcp_media_.media_type == media_type_application)
+			{
+				// 辅流：追加 add_extend_video_channel 生成的 BFCP application 行
+				sdp.medias.push_back(bfcp_media_);
+			}
 			std::string s = sdp.to_string();
 			//std::stringstream ss;
 			//ss << "v=0\r\n";
@@ -1062,6 +1201,348 @@ namespace voip
 			if(id==0)
 				id= bfcp_transaction_id_.fetch_add(1);
 			return id;
+		}
+
+		const rtpx::sdp_media* sip_call::find_bfcp_media(const rtpx::sdp& sdp)const
+		{
+			for (auto& m : sdp.medias)
+			{
+				if (m.media_type == media_type_application && m.app_data_type == "BFCP")
+				{
+					return &m;
+				}
+			}
+			return nullptr;
+		}
+
+		void sip_call::parse_bfcp_attributes(const rtpx::sdp_media& m)
+		{
+			for (auto& attr : m.attrs)
+			{
+				if (attr.key == "confid")
+				{
+					bfcp_conference_id_ = (uint32_t)strtoul(attr.val.c_str(), nullptr, 10);
+				}
+				else if (attr.key == "userid")
+				{
+					bfcp_remote_user_id_ = (uint16_t)strtoul(attr.val.c_str(), nullptr, 10);
+				}
+				else if (attr.key == "floorid")
+				{
+					// a=floorid:<floor-id> [mstrm:<stream-id>]，mstrm 与媒体行的 a=label 对应
+					std::vector<std::string> ss = sys::string_util::split(attr.val, " ");
+					if (!ss.empty())
+					{
+						bfcp_floor_id_ = (uint16_t)strtoul(ss[0].c_str(), nullptr, 10);
+					}
+					for (size_t i = 1; i < ss.size(); i++)
+					{
+						if (ss[i].find("mstrm:") == 0)
+						{
+							bfcp_mstrm_ = (uint16_t)strtoul(ss[i].substr(6).c_str(), nullptr, 10);
+						}
+					}
+				}
+			}
+		}
+
+		// 绑定本地 BFCP 端口并初始化默认参数（confid/userid/floorid）
+		bool sip_call::bind_bfcp_socket()
+		{
+			if (bfcp_ && bfcp_->is_active())
+			{
+				return true;
+			}
+			if (bfcp_conference_id_ == 0)
+			{
+				bfcp_conference_id_ = sys::util::random_number<uint32_t>(1, 0xFFFFFFFE);
+			}
+			if (bfcp_user_id_ == 0)
+			{
+				bfcp_user_id_ = 1;
+			}
+			if (bfcp_floor_id_ == 0)
+			{
+				bfcp_floor_id_ = 2;
+			}
+
+			bfcp_ = std::make_shared<bfcp_client>(ep_->io_context());
+			bfcp_->set_message_handler(std::bind(&sip_call::handle_bfcp_message, this,
+				std::placeholders::_1, std::placeholders::_2));
+
+			// 仅从配置的端口范围绑定（便于防火墙按范围放行）；未配置范围时直接失败，
+			// 避免随机端口被防火墙拦截导致难以排查
+			if (!rtp_ports_)
+			{
+				if (log_)
+				{
+					log_->error("BFCP: rtp port range not configured, cannot bind BFCP socket")->flush();
+				}
+				bfcp_.reset();
+				return false;
+			}
+			// 从本会话端口池取空闲端口并预留：与媒体流同一游标、同一范围，绝不落到媒体端口上
+			// （此前用 endpoint 共享的 port_range，其游标无人推进，BFCP 永远拿到首个媒体端口 51000）
+			bool started = false;
+			for (int i = 0; i < 16; i++)
+			{
+				uint16_t port = rtp_->allocate_udp_port();
+				if (port == 0)
+				{
+					break;
+				}
+				if (bfcp_->start(log_, port))
+				{
+					started = true;
+					break;
+				}
+				rtp_->release_port(port);
+			}
+			if (!started)
+			{
+				if (log_)
+				{
+					log_->error("BFCP: bind local port failed, rtp ports {}-{} exhausted", rtp_ports_->min_port(), rtp_ports_->max_port())->flush();
+				}
+				bfcp_.reset();
+				return false;
+			}
+			bfcp_local_port_ = bfcp_->local_port();
+			return true;
+		}
+
+		bool sip_call::start_bfcp(const rtpx::sdp& remote_sdp)
+		{
+			const rtpx::sdp_media* m = find_bfcp_media(remote_sdp);
+			if (!m || m->rtp_port <= 0 || m->rtp_address.empty() || m->rtp_address == "0.0.0.0")
+			{
+				return false;
+			}
+
+			parse_bfcp_attributes(*m);
+
+			// 缺省值兜底
+			if (bfcp_conference_id_ == 0)
+			{
+				bfcp_conference_id_ = 1;
+			}
+			if (bfcp_remote_user_id_ == 0)
+			{
+				bfcp_remote_user_id_ = 1;
+			}
+			if (bfcp_floor_id_ == 0)
+			{
+				bfcp_floor_id_ = 1;
+			}
+			// 点对点场景：本端 user id 取与对端不同的值（对端未先绑定本端 socket 时）
+			if (bfcp_user_id_ == 0)
+			{
+				bfcp_user_id_ = (bfcp_remote_user_id_ == 1) ? 2 : 1;
+			}
+
+			if (!bind_bfcp_socket())
+			{
+				return false;
+			}
+
+			bfcp_->set_remote(m->rtp_address, (uint16_t)m->rtp_port);
+			bfcp_negotiated_ = true;
+
+			if (log_)
+			{
+				log_->info("BFCP negotiated: local port={}, remote={}:{}, confid={}, userid={}, floorid={}",
+					bfcp_local_port_, m->rtp_address, m->rtp_port, bfcp_conference_id_, bfcp_user_id_, bfcp_floor_id_)->flush();
+			}
+			return true;
+		}
+
+		void sip_call::stop_bfcp()
+		{
+			if (bfcp_)
+			{
+				bfcp_->stop();
+				if (rtp_)
+				{
+					rtp_->release_port(bfcp_->local_port());
+				}
+			}
+			bfcp_negotiated_ = false;
+			bfcp_owned_ = false;
+			bfcp_pending_ = false;
+			bfcp_remote_owned_ = false;
+		}
+
+		void sip_call::handle_bfcp_message(const bfcp::message& msg, const asio::ip::udp::endpoint& ep)
+		{
+			switch (msg.primitive)
+			{
+			case bfcp::primitive::floor_request:
+			{
+				// 对端请求辅流令牌，我方作为 chair 决策（RFC 4582 §13.1）
+				uint16_t floor_id = msg.floor_ids.empty() ? bfcp_floor_id_ : msg.floor_ids[0];
+				if (bfcp_owned_)
+				{
+					// 我方持有令牌：拒绝（对齐 h323 持有时 ack=false，不回调）
+					if (log_)
+					{
+						log_->info("BFCP: deny floor request from user={}, owned locally", msg.user_id)->flush();
+					}
+					bfcp_->send(bfcp::build_floor_request_status(bfcp_conference_id_, msg.transaction_id, msg.user_id,
+						bfcp_remote_floor_request_id_, floor_id, bfcp::st_denied));
+					return;
+				}
+
+				// 我方未持有：授予
+				if (bfcp_remote_floor_request_id_ == 0)
+				{
+					bfcp_remote_floor_request_id_ = (uint16_t)(sys::util::random_number<uint16_t>(1, 0xFFFE));
+				}
+				bfcp_remote_user_id_ = msg.user_id;
+				bfcp_remote_owned_ = true;
+				bfcp_->send(bfcp::build_floor_request_status(bfcp_conference_id_, msg.transaction_id, msg.user_id,
+					bfcp_remote_floor_request_id_, floor_id, bfcp::st_granted));
+				if (log_)
+				{
+					log_->info("BFCP: grant floor to user={}, floor_request_id={}", msg.user_id, bfcp_remote_floor_request_id_)->flush();
+				}
+				// 对齐 h323 授予对端后的回调 (owned=false, active=true)
+				on_bfcp_presentation_role_changed(false, true);
+				break;
+			}
+			case bfcp::primitive::floor_release:
+			{
+				// 对端释放（RFC 4582 §13.4）：回 Released 状态
+				bfcp_->send(bfcp::build_floor_request_status(bfcp_conference_id_, msg.transaction_id, msg.user_id,
+					msg.floor_request_id, bfcp_floor_id_, bfcp::st_released));
+				if (bfcp_remote_owned_)
+				{
+					bfcp_remote_owned_ = false;
+					bfcp_remote_floor_request_id_ = 0;
+					on_bfcp_presentation_role_changed(false, false);
+				}
+				break;
+			}
+			case bfcp::primitive::floor_request_status:
+			{
+				// 对端对我方请求/释放的响应
+				uint8_t status = msg.overall_status != 0 ? msg.overall_status : msg.status;
+				bool is_response = (msg.transaction_id == bfcp_pending_transaction_ && bfcp_pending_transaction_ != 0);
+				bool is_notify = (msg.transaction_id == 0);
+
+				if (bfcp_pending_ && (is_response || is_notify))
+				{
+					bfcp_floor_request_id_ = msg.floor_request_id;
+					if (status == bfcp::st_granted)
+					{
+						// 令牌授予成功（对齐 h323 presentationTokenResponse(ack) + 通道打开）
+						bfcp_owned_ = true;
+						bfcp_pending_ = false;
+						bfcp_pending_transaction_ = 0;
+						if (log_)
+						{
+							log_->info("BFCP: floor granted, floor_request_id={}", bfcp_floor_request_id_)->flush();
+						}
+						on_bfcp_presentation_role_changed(true, true);
+					}
+					else if (status == bfcp::st_denied)
+					{
+						bfcp_owned_ = false;
+						bfcp_pending_ = false;
+						bfcp_pending_transaction_ = 0;
+						if (log_)
+						{
+							log_->info("BFCP: floor denied")->flush();
+						}
+						on_bfcp_presentation_role_changed(false, false);
+					}
+					else if (status == bfcp::st_released || status == bfcp::st_cancelled)
+					{
+						// FloorRelease 的响应，本地状态已在发送时清理
+						bfcp_pending_ = false;
+						bfcp_pending_transaction_ = 0;
+						bfcp_floor_request_id_ = 0;
+					}
+					else if (log_)
+					{
+						log_->debug("BFCP: floor request status={}, floor_request_id={}", (int)status, msg.floor_request_id)->flush();
+					}
+				}
+				else if (is_notify && status == bfcp::st_revoked)
+				{
+					// 对端作为 chair 收回我方令牌（server-initiated）
+					if (bfcp_owned_)
+					{
+						bfcp_owned_ = false;
+						bfcp_floor_request_id_ = 0;
+						on_bfcp_presentation_role_changed(false, false);
+					}
+				}
+				else if (is_notify && status == bfcp::st_granted && !bfcp_owned_ && !bfcp_remote_owned_
+					&& msg.beneficiary_id > 0 && msg.beneficiary_id == bfcp_remote_user_id_)
+				{
+					// 非应答的授予通知：部分对端 chair 本地抓流时只发 FloorRequestStatus 通知
+					// （无对应请求事务），持有者须明确是对端用户才认定为对端持有
+					bfcp_remote_owned_ = true;
+					if (msg.floor_request_id > 0)
+					{
+						bfcp_remote_floor_request_id_ = msg.floor_request_id;
+					}
+					if (log_)
+					{
+						log_->info("BFCP: remote owns floor (notify), user={}", msg.beneficiary_id)->flush();
+					}
+					on_bfcp_presentation_role_changed(false, true);
+				}
+				break;
+			}
+			case bfcp::primitive::floor_status:
+			{
+				// 对端作为 floor control server 时，本地抓取/释放辅流不经过 FloorRequest，
+				// 仅以 FloorStatus（RFC 4582 §9.10）推送楼层状态，需据此同步"对端持有"状态
+				uint8_t status = msg.overall_status != 0 ? msg.overall_status : msg.status;
+				// 持有者优先取 BENEFICIARY-ID；缺失时视为对端（我方请求的授予走 FloorRequestStatus 应答）
+				bool held_by_remote = (msg.beneficiary_id == 0 || msg.beneficiary_id != bfcp_user_id_);
+				if (status == bfcp::st_granted && held_by_remote && !bfcp_owned_ && !bfcp_remote_owned_)
+				{
+					bfcp_remote_owned_ = true;
+					if (msg.beneficiary_id > 0)
+					{
+						bfcp_remote_user_id_ = msg.beneficiary_id;
+					}
+					if (msg.floor_request_id > 0)
+					{
+						bfcp_remote_floor_request_id_ = msg.floor_request_id;
+					}
+					if (log_)
+					{
+						log_->info("BFCP: floor status granted to remote, user={}, floor_request_id={}",
+							bfcp_remote_user_id_, bfcp_remote_floor_request_id_)->flush();
+					}
+					// 对齐 h323 对端获取令牌后的回调 (owned=false, active=true)
+					on_bfcp_presentation_role_changed(false, true);
+				}
+				else if (bfcp_remote_owned_ && (status == bfcp::st_released || status == bfcp::st_revoked
+					|| status == bfcp::st_denied || status == bfcp::st_cancelled))
+				{
+					bfcp_remote_owned_ = false;
+					bfcp_remote_floor_request_id_ = 0;
+					if (log_)
+					{
+						log_->info("BFCP: floor status released by remote, status={}", (int)status)->flush();
+					}
+					// 对齐 h323 对端释放令牌后的回调 (owned=false, active=false)
+					on_bfcp_presentation_role_changed(false, false);
+				}
+				break;
+			}
+			case bfcp::primitive::hello_ack:
+			case bfcp::primitive::hello:
+			case bfcp::primitive::chair_action_ack:
+			case bfcp::primitive::error:
+			default:
+				// Hello 已由 bfcp_client 自动应答；其余暂不处理
+				break;
+			}
 		}
 
 	}

@@ -115,6 +115,10 @@ namespace rtpx
 		}
 
 		uint16_t i = begin_seq_;
+		uint16_t drop_begin = i;
+		int dropped = 0;
+		int holes = 0;
+		bool has_nri = false;
 		while (!sn::ahead_of<uint16_t>(i, end_seq_))
 		{
 			int idx = i % PACKET_BUFFER_SIZE;
@@ -123,6 +127,7 @@ namespace rtpx
 			auto pkt = recv_packs_[idx];
 			if (!pkt)
 			{
+				holes++;
 				continue;
 			}
 
@@ -132,12 +137,10 @@ namespace rtpx
 			if (fui.nri > 0)  // nal ref idc
 			{
 				waiting_for_keyframe_ = true;
-			}
-			if (log_)
-			{
-				log_->warn("H264 Drop rtp packet seq={}",i-1)->flush();
+				has_nri = true;
 			}
 			recv_packs_[idx].reset();
+			dropped++;
 
 			if (pkt->header()->m==1)
 			{
@@ -148,6 +151,15 @@ namespace rtpx
 		}
 
 		begin_seq_ = i;
+
+		// 一帧一条汇总（原先逐包打 warning，丢一个大 I 帧就刷几十行）：
+		// holes>0＝seq 范围内有从未到达的包（真丢包，NACK 也没补回来）；
+		// holes=0＝包都在但组帧条件不满足（如尾部 marker 未到，对端分包/发送异常）
+		if (log_ && dropped > 0)
+		{
+			log_->warn("H264 dropped incomplete frame: seq={}~{} dropped={} holes={} nri={} waiting_keyframe={}",
+				drop_begin, (uint16_t)(i - 1), dropped, holes, has_nri ? 1 : 0, waiting_for_keyframe_ ? 1 : 0)->flush();
+		}
 	}
 
 	bool receiver_video_h264::combin_frame(const std::vector<packet_ptr>& pkts)
@@ -184,6 +196,7 @@ namespace rtpx
 				if (fui.t == 7 || fui.t == 8 || fui.t == 5)
 				{
 					waiting_for_keyframe_ = false;
+					waiting_logged_ = false;
 				}
 				std::string frame_data;
 				frame_data.reserve(payload_size + 4);
@@ -207,6 +220,15 @@ namespace rtpx
 				else
 				{
 					stats_.frames_droped++;
+					// 等关键帧期间的静默丢弃只记一次，避免排障时误判为"没有任何帧到达"
+					if (!waiting_logged_)
+					{
+						waiting_logged_ = true;
+						if (log_)
+						{
+							log_->warn("H264 frame suppressed while waiting for keyframe")->flush();
+						}
+					}
 				}
 			}
 			else if (fui.t == 24)  //STAP-A
@@ -247,6 +269,15 @@ namespace rtpx
 					else
 					{
 						stats_.frames_droped++;
+						// 等关键帧期间的静默丢弃只记一次，避免排障时误判为"没有任何帧到达"
+						if (!waiting_logged_)
+						{
+							waiting_logged_ = true;
+							if (log_)
+							{
+								log_->warn("H264 frame suppressed while waiting for keyframe")->flush();
+							}
+						}
 					}
 
 					buf += (nal_size + 2);
@@ -278,6 +309,7 @@ namespace rtpx
 					if (nalh.t == 7 || nalh.t == 8 || nalh.t == 5)
 					{
 						waiting_for_keyframe_ = false;
+						waiting_logged_ = false;
 					}
 
 					std::string frame_data;
@@ -295,6 +327,15 @@ namespace rtpx
 					else
 					{
 						stats_.frames_droped++;
+						// 等关键帧期间的静默丢弃只记一次，避免排障时误判为"没有任何帧到达"
+						if (!waiting_logged_)
+						{
+							waiting_logged_ = true;
+							if (log_)
+							{
+								log_->warn("H264 frame suppressed while waiting for keyframe")->flush();
+							}
+						}
 					}
 					buf += (nal_size + 2);
 					size -= (nal_size + 2);
@@ -322,6 +363,7 @@ namespace rtpx
 					if (nalh.t == 7 || nalh.t == 8 || nalh.t == 5)
 					{
 						waiting_for_keyframe_ = false;
+						waiting_logged_ = false;
 					}
 
 					std::string frame_data;
@@ -372,6 +414,7 @@ namespace rtpx
 					if (nalh.t == 7 || nalh.t == 8 || nalh.t == 5)
 					{
 						waiting_for_keyframe_ = false;
+						waiting_logged_ = false;
 					}
 
 					std::string frame_data;
@@ -428,6 +471,16 @@ namespace rtpx
 				}
 				if (!first_pkt)
 				{
+					// FU-A 分片首包缺失（首片丢失或未收齐即被超时丢弃），整个分片 NAL 无法还原；
+					// 只记一次，避免刷屏
+					if (!fu_start_missing_logged_)
+					{
+						fu_start_missing_logged_ = true;
+						if (log_)
+						{
+							log_->warn("H264 FU-A start packet missing, fragmented nal dropped")->flush();
+						}
+					}
 					continue;
 				}
 
@@ -463,6 +516,7 @@ namespace rtpx
 						if (nalh.t == 5 || nalh.t == 7 || nalh.t == 8)
 						{
 							waiting_for_keyframe_ = false;
+							waiting_logged_ = false;
 						}
 
 						if (!waiting_for_keyframe_)
@@ -473,6 +527,15 @@ namespace rtpx
 						else
 						{
 							stats_.frames_droped++;
+							// 等关键帧期间的静默丢弃只记一次，避免排障时误判为"没有任何帧到达"
+							if (!waiting_logged_)
+							{
+								waiting_logged_ = true;
+								if (log_)
+								{
+									log_->warn("H264 frame suppressed while waiting for keyframe")->flush();
+								}
+							}
 						}
 					}
 				}

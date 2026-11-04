@@ -115,6 +115,9 @@ namespace rtpx
 		}
 
 		uint16_t i = begin_seq_;
+		uint16_t drop_begin = i;
+		int dropped = 0;
+		int holes = 0;
 		while (!sn::ahead_of<uint16_t>(i, end_seq_))
 		{
 			int idx = i % PACKET_BUFFER_SIZE;
@@ -123,17 +126,14 @@ namespace rtpx
 			auto pkt = recv_packs_[idx];
 			if (!pkt)
 			{
+				holes++;
 				continue;
 			}
 
 			h265::nal_header_t fui = { 0 };
 			h265::nal_header_set(&fui, pkt->payload(),pkt->payload_size());
-
-			if (log_)
-			{
-				log_->warn("H265 Drop rtp packet seq={}",i)->flush();
-			}
 			recv_packs_[idx].reset();
+			dropped++;
 
 			if (pkt->header()->m==1)
 			{
@@ -144,6 +144,13 @@ namespace rtpx
 		}
 
 		begin_seq_ = i;
+
+		// 一帧一条汇总（原先逐包打 warning）：holes>0＝范围内有从未到达的包（真丢包）；holes=0＝组帧条件不满足
+		if (log_ && dropped > 0)
+		{
+			log_->warn("H265 dropped incomplete frame: seq={}~{} dropped={} holes={}",
+				drop_begin, (uint16_t)(i - 1), dropped, holes)->flush();
+		}
 	}
 
 	bool receiver_video_h265::combin_frame(const std::vector<packet_ptr>& pkts)

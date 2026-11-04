@@ -138,4 +138,9 @@ if(ms)
 
 ### 其他
 对于无Offer/Answer交互的协议，可以调用 ms->set_local_xxx和ms->set_remote_xxx来构建两端信息
+
+### 流用途标记（content/label）
+`ms->set_content("slides")` / `ms->set_label("12")`（RFC 4796 / RFC 4574）用于标记流用途，
+生成 offer 时输出为 `a=content:slides` / `a=label:12`；处理对端 SDP 时自动捕获对端 m 行的
+取值，生成 answer 时原样回带（典型场景：辅流视频标记 + 与 BFCP `a=floorid:2 mstrm:12` 关联）
 ###

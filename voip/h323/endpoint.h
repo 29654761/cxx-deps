@@ -49,6 +49,11 @@ namespace voip
 			void set_max_bitrate(int v);
 			int max_bitrate()const;
 
+			// 辅流（H.239）支持开关：开启后视频呼叫的 TCS 能力集附加 extend_video 通道与
+			// h239 控制通道（与 sip 侧 BFCP 的 set_content_support 对应）。须在创建呼叫之前设置
+			void set_content_support(bool support) { content_support_ = support; }
+			bool content_support()const { return content_support_; }
+
 			void set_logger(spdlogger_ptr log) { log_ = log; }
 			void set_incoming_media(bool audio, bool video) { incoming_audio_ = audio; incoming_video_ = video; }
 
@@ -115,6 +120,7 @@ namespace voip
 			bool incoming_video_ = true;
 			int max_bitrate_ = 7865;
 			bool use_rtp_address_ = false;
+			bool content_support_ = false;
 
 			sys::echo<std::string, voip::call_ptr> echo_gks_call_;
 		};

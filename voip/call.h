@@ -77,6 +77,9 @@ namespace voip
 		virtual bool start(bool audio,bool video,bool use_rtp_address) = 0;
 		virtual void stop(voip::call::reason_code_t reason) = 0;
 		virtual bool require_keyframe() = 0;
+		// 仅请求指定 mid 的视频流出关键帧（如 "extend_video" 辅流），不影响其他视频流；
+		// 默认不支持（返回 false），由具备按流请求能力的子类实现
+		virtual bool require_keyframe(const std::string& mid) { return false; }
 		virtual bool answer() = 0;
 		virtual bool refuse() = 0;
 		virtual bool request_presentation_role() = 0;

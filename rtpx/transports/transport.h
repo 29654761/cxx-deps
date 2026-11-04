@@ -8,6 +8,7 @@
 
 #pragma once
 #include <shared_mutex>
+#include <atomic>
 #include <asio.hpp>
 #include <sys2/update_time.h>
 #include <spdlog/spdlogger.hpp>
@@ -143,6 +144,7 @@ namespace rtpx
 		spdlogger_ptr log_;
 		sys::update_time update_;
 		uint16_t local_port_=0;
+		std::atomic<bool> inbound_logged_{ false };   // 首个入站报文一次性日志（链路诊断用）
 
 		std::string ice_ufrag_remote_;
 		std::string ice_pwd_remote_;

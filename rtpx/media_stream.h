@@ -7,6 +7,7 @@
 
 #pragma once
 #include <memory>
+#include <atomic>
 #include <vector>
 #include <shared_mutex>
 #include <asio.hpp>
@@ -118,6 +119,13 @@ namespace rtpx {
 		void set_msid_tid(const std::string& v) { msid_tid_ = v; }
 		const std::string& msid_tid()const { return msid_tid_; }
 
+		// RFC 4796 a=content / RFC 4574 a=label：标记流用途（如辅流 a=content:slides a=label:12）。
+		// 生成 offer 时输出本地设置；处理对端 SDP 时捕获对端取值，生成 answer 时原样回带
+		void set_content(const std::string& v);
+		void set_label(const std::string& v);
+		const std::string& content()const { return content_; }
+		const std::string& label()const { return label_; }
+
 		void set_rtcp_mux(bool v) { is_rtcp_mux_ = v; }
 		bool is_rtcp_mux()const { return is_rtcp_mux_; }
 
@@ -217,6 +225,8 @@ namespace rtpx {
 		std::string mid_;
 		std::string msid_sid_;
 		std::string msid_tid_;
+		std::string content_;
+		std::string label_;
 
 		std::string local_ice_ufrag_;
 		std::string local_ice_pwd_;
@@ -251,6 +261,7 @@ namespace rtpx {
 		std::map<uint8_t, receiver_ptr> receivers_;
 
 		std::string app_proto_;
+		std::atomic<bool> inbound_logged_{ false };   // 首个入站 RTP 一次性日志（链路诊断用）
 		// 对端 application 媒体行的 proto 串（如 UDP/BFCP、RTP/AVP），用于不支持的
 		// 应用媒体在应答中按 RFC 3264 原样输出拒绝行（端口 0）
 		std::set<std::string> app_protos_;

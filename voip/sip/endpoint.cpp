@@ -211,6 +211,7 @@ namespace voip
 			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, std::placeholders::_7));
 			call->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1, std::placeholders::_2));
 			call->set_logger(log_);
+			call->set_content_support(content_support_);
 			call->set_url(vurl);
 			call->set_max_bitrate(max_bitrate());
 			call->make_call_id();
@@ -238,6 +239,7 @@ namespace voip
 			if (!ep.con->remote_address(vurl.host, vurl.port))
 				return nullptr;
 			call->set_logger(log_);
+			call->set_content_support(content_support_);
 			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, std::placeholders::_7));
 			call->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1, std::placeholders::_2));
 			call->set_url(vurl);
@@ -268,6 +270,7 @@ namespace voip
 			if (!gkcon->remote_address(vurl.host, vurl.port))
 				return nullptr;
 			call->set_logger(log_);
+			call->set_content_support(content_support_);
 			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, std::placeholders::_7));
 			call->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1, std::placeholders::_2));
 			call->set_url(vurl);
@@ -763,6 +766,7 @@ namespace voip
 			call->set_on_incoming_call(std::bind(&endpoint::handle_incoming_call, this, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5,std::placeholders::_6, std::placeholders::_7));
 			call->set_on_destroy(std::bind(&endpoint::handle_destroy_call, this, self, std::placeholders::_1, std::placeholders::_2));
 			call->set_logger(log_);
+			call->set_content_support(content_support_);
 			call->set_max_bitrate(max_bitrate());
 			call->make_call_id();
 			call->set_invite(message);

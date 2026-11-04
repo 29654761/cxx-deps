@@ -119,9 +119,18 @@ namespace rtpx
 
 		std::shared_mutex nack_packs_mutex_;
 		std::map<uint16_t,nack_pkt_t> nack_packs_;
-		int nack_max_count_ = 1;
+		// 每个缺包最多重传请求次数（收到补包时未从 nack_packs_ 清除，靠次数耗尽移除）。
+		// 旧值 1＝每个缺包只请求一次，请求包或重传包任一丢失缺口就永远补不上，1 秒后整帧丢弃
+		int nack_max_count_ = 5;
 		bool reset_ = true;
 		bool waiting_for_keyframe_=false;
+		// waiting_for_keyframe_ 抑制帧输出时只记一次日志的标记（ waiting 解除时复位）
+		bool waiting_logged_ = false;
+		// 连续收到"窗口起点之前"旧包的计数：偶发是 NACK 重传/乱序，持续出现说明对端
+		// 流重启后 seq 回退到窗口之前，此时不能无限丢弃，应判定流重启并重建接收窗口
+		int behind_count_ = 0;
+		// 最近一次正常（前向）插入的时间（秒）：配合 behind_count_ 判定流重启
+		double last_forward_insert_ = 0;
 		double last_keyframe_required_ = 0;
 		rtp_source rtp_source_;
 

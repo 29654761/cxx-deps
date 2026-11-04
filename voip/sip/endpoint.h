@@ -63,6 +63,11 @@ namespace voip
 			void set_logger(spdlogger_ptr log) { log_ = log; }
 			void set_incoming_media(bool audio, bool video) { incoming_audio_ = audio; incoming_video_ = video; }
 
+			// 辅流（BFCP）支持开关：开启后主叫 offer 携带第二条 video（extend_video）与
+			// m=application UDP/BFCP；被叫按对端 offer 自适应协商。默认关闭
+			void set_content_support(bool support) { content_support_ = support; }
+			bool content_support()const { return content_support_; }
+
 
 			bool start(const std::string& addr,int port);
 			void stop();
@@ -152,6 +157,7 @@ namespace voip
 
 			bool incoming_audio_ = true;
 			bool incoming_video_ = true;
+			bool content_support_ = false;
 			int max_bitrate_ = 2048;
 			bool use_rtp_address_ = false;
 

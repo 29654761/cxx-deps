@@ -172,7 +172,11 @@ namespace voip
 			if (video)
 			{
 				add_video_channel_h264();
-				add_extend_video_channel_h264();
+				// 辅流（H.239）支持：开启时 TCS 携带 extend_video 通道与 h239 控制通道
+				if (content_support_)
+				{
+					add_extend_video_channel_h264();
+				}
 			}
 
 			h225_buffer_.clear();
@@ -329,11 +333,23 @@ namespace voip
 		bool h323_call::request_presentation_role()
 		{
 			if (!has_h239_control())
+			{
+				if (log_)
+				{
+					log_->warn("H.323: request presentation failed: no h239 control capability, url={}", url_.to_string())->flush();
+				}
 				return false;
+			}
 
 			media_channel_t remote,local;
 			if (!find_extend_video(remote,local))
+			{
+				if (log_)
+				{
+					log_->warn("H.323: request presentation failed: no extend video channel, url={}", url_.to_string())->flush();
+				}
 				return false;
+			}
 
 			if (h239_token_owned_)
 				return false;
@@ -1884,8 +1900,18 @@ namespace voip
 
 			H245_ArrayOf_GenericParameter& params = (H245_ArrayOf_GenericParameter&)body.m_messageContent;
 			// Note order is important (Table 12/H.239)
-			H323AddGenericParameterBoolean(params, acknowledge ? 126 : 127, true); // Acknowledge/Reject
-			H323AddGenericParameterInteger(params, 42, logical_channel, H245_ParameterValue::e_unsignedMin);
+			// 与 h323plus BuildH239GenericMessageResponse 严格一致：
+			// ack = [Acknowledge(126) + TerminalLabel(44) + ChannelId(42)]，reject = [Reject(127)]
+			if (acknowledge)
+			{
+				H323AddGenericParameterBoolean(params, 126, true);
+				H323AddGenericParameterInteger(params, 44, terminal_label, H245_ParameterValue::e_unsignedMin);
+				H323AddGenericParameterInteger(params, 42, logical_channel, H245_ParameterValue::e_unsignedMin);
+			}
+			else
+			{
+				H323AddGenericParameterBoolean(params, 127, true);
+			}
 
 			PPER_Stream stream;
 			msg.Encode(stream);
@@ -2279,6 +2305,11 @@ namespace voip
 					{
 						on_h239_message(gen.m_subMessageIdentifier, gen.m_messageContent);
 					}
+					else if (log_)
+					{
+						log_->debug("H.323: generic request ignored, oid={}, url={}",
+							(const char*)H323GetCapabilityIdentifier(gen.m_messageIdentifier), url_.to_string())->flush();
+					}
 				}
 			}
 			else if (msg.GetTag() == H245_MultimediaSystemControlMessage::e_response)
@@ -2321,6 +2352,11 @@ namespace voip
 					{
 						on_h239_message(gen.m_subMessageIdentifier, gen.m_messageContent);
 					}
+					else if (log_)
+					{
+						log_->debug("H.323: generic response ignored, oid={}, url={}",
+							(const char*)H323GetCapabilityIdentifier(gen.m_messageIdentifier), url_.to_string())->flush();
+					}
 				}
 			}
 			else if (msg.GetTag() == H245_MultimediaSystemControlMessage::e_command)
@@ -2343,6 +2379,11 @@ namespace voip
 					{
 						on_h239_message(gen.m_subMessageIdentifier, gen.m_messageContent);
 					}
+					else if (log_)
+					{
+						log_->debug("H.323: generic command ignored, oid={}, url={}",
+							(const char*)H323GetCapabilityIdentifier(gen.m_messageIdentifier), url_.to_string())->flush();
+					}
 				}
 			}
 			else if (msg.GetTag() == H245_MultimediaSystemControlMessage::e_indication)
@@ -2364,6 +2405,11 @@ namespace voip
 					if (H323GetCapabilityIdentifier(body.m_messageIdentifier) == H239MessageOID)
 					{
 						on_h239_message(body.m_subMessageIdentifier, body.m_messageContent);
+					}
+					else if (log_)
+					{
+						log_->debug("H.323: generic indication ignored, oid={}, url={}",
+							(const char*)H323GetCapabilityIdentifier(body.m_messageIdentifier), url_.to_string())->flush();
 					}
 				}
 				else if (ind.GetTag() == H245_IndicationMessage::e_conferenceIndication)
@@ -2924,6 +2970,11 @@ namespace voip
 					open_chann.codec_type = codec_type_h264;
 					open_chann.type = media_channel_type_t::extend;
 					open_chann.mid = "extend_video";
+					if (log_)
+					{
+						log_->info("H.323: H239 extend video channel opening, chann={}, url={}",
+							open_chann.channel_number, url_.to_string())->flush();
+					}
 				}
 			}
 			else if (body.m_forwardLogicalChannelParameters.m_dataType.GetTag() == H245_DataType::e_h235Media)
@@ -3020,6 +3071,18 @@ namespace voip
 
 			if (open_chann.channel_number<0||media_ctrl_address.IsAny() || open_chann.payload_type == 0 || open_chann.session_id == -1)
 			{
+				if (log_)
+				{
+					log_->error("H.323: reject open logical channel: invalid parameters, chann={}, media={}, session={}, pt={}, ctrl={}, url={}",
+						open_chann.channel_number, (int)open_chann.media_type, open_chann.session_id, open_chann.payload_type,
+						(const char*)media_ctrl_address.AsString(), url_.to_string())->flush();
+				}
+				if (open_chann.type == media_channel_type_t::extend)
+				{
+					// 对端辅流通道被拒：回退"对端持有"状态，避免应用层停留在 active
+					h239_remote_owned_ = false;
+					on_h239_presentation_role_changed(false, false);
+				}
 				send_open_logical_channel_reject(open_chann.channel_number, H245_OpenLogicalChannelReject_cause::e_unspecified);
 				return;
 			}
@@ -3325,6 +3388,11 @@ namespace voip
 
 		void h323_call::on_h239_message(unsigned sub_message, const H245_ArrayOf_GenericParameter& params)
 		{
+			if (log_)
+			{
+				log_->debug("H.323: H239 message received, sub_message={}, params={}, url={}",
+					sub_message, params.GetSize(), url_.to_string())->flush();
+			}
 			switch (sub_message) {
 				case 1: // flowControlReleaseRequest GenericRequest
 				{
@@ -3373,6 +3441,11 @@ namespace voip
 
 		void h323_call::on_h239_presentation_request(unsigned logical_channel, unsigned symmetry_breaking, unsigned terminal_label)
 		{
+			if (log_)
+			{
+				log_->info("H.323: H239 presentation request, channel={}, symmetry={}, terminal_label={}, owned={}, url={}",
+					logical_channel, symmetry_breaking, terminal_label, h239_token_owned_, url_.to_string())->flush();
+			}
 			bool ack = false;
 			if (h239_symmetry_breaking_ != 0) {
 				// Our request is in progress, 11.2.4/H.239
@@ -3380,13 +3453,13 @@ namespace voip
 				{
 					ack = false; // No, we have it
 				}
-				else if (h239_symmetry_breaking_ < symmetry_breaking) 
+				else if (h239_symmetry_breaking_ < symmetry_breaking)
 				{
 					ack = true;
 					h239_token_owned_ = false;
 					h239_symmetry_breaking_ = 0;
 				}
-				else 
+				else
 				{
 					// Try again
 					h239_symmetry_breaking_ = PRandom::Number(1, 127);
@@ -3400,19 +3473,31 @@ namespace voip
 				h239_token_channel_ = logical_channel;
 				h239_terminal_label_ = terminal_label;
 			}
-			else 
+			else
 			{
 				ack = false;
 			}
 
 			if (ack) {
+				// 对端获得令牌；辅流逻辑通道随对端 OLC 打开后媒体才到达
+				h239_remote_owned_ = true;
 				on_h239_presentation_role_changed(h239_token_owned_, ack);
+			}
+			if (log_)
+			{
+				log_->info("H.323: H239 presentation response, acknowledge={}, channel={}, url={}",
+					ack, logical_channel, url_.to_string())->flush();
 			}
 			send_h239_presentation_response(logical_channel, ack, terminal_label);
 		}
 
 		void h323_call::on_h239_presentation_response(unsigned logical_channel, unsigned terminal_label, bool rejected)
 		{
+			if (log_)
+			{
+				log_->info("H.323: H239 presentation response, channel={}, terminal_label={}, rejected={}, pending_symmetry={}, url={}",
+					logical_channel, terminal_label, rejected, h239_symmetry_breaking_, url_.to_string())->flush();
+			}
 			// Did we request it?
 			if (h239_symmetry_breaking_ == 0)
 			{
@@ -3422,6 +3507,7 @@ namespace voip
 
 			h239_symmetry_breaking_ = 0;
 			h239_token_owned_ = !rejected;
+			h239_remote_owned_ = false;
 			if (rejected)
 			{
 				on_h239_presentation_role_changed(h239_token_owned_, false);
@@ -3479,13 +3565,35 @@ namespace voip
 
 		void h323_call::on_h239_presentation_release(unsigned logical_channel, unsigned terminal_label)
 		{
-			on_h239_presentation_role_changed(h239_token_owned_, false);
+			if (log_)
+			{
+				log_->info("H.323: H239 presentation release, channel={}, terminal_label={}, url={}",
+					logical_channel, terminal_label, url_.to_string())->flush();
+			}
+			// 对端（令牌持有者）释放：清理本地状态，残留 owned 会阻塞后续的授予与请求
+			bool was_owned = h239_token_owned_;
+			h239_token_owned_ = false;
+			h239_remote_owned_ = false;
+			h239_token_channel_ = 0;
+			h239_terminal_label_ = 0;
+			h239_symmetry_breaking_ = 0;
+			on_h239_presentation_role_changed(was_owned, false);
 			remove_media_stream("extend_video");
 		}
 
 		void h323_call::on_h239_presentation_indication(unsigned logical_channel, unsigned terminal_label)
 		{
-
+			// OwnerIndication（h323plus 在 ack 后发送）：对端持有令牌
+			if (log_)
+			{
+				log_->info("H.323: H239 owner indication, channel={}, terminal_label={}, url={}",
+					logical_channel, terminal_label, url_.to_string())->flush();
+			}
+			if (!h239_token_owned_ && !h239_remote_owned_)
+			{
+				h239_remote_owned_ = true;
+				on_h239_presentation_role_changed(false, true);
+			}
 		}
 
 		void h323_call::on_h239_presentation_role_changed(bool owned, bool active)

@@ -8,6 +8,8 @@
 #pragma once
 #include <memory>
 #include <map>
+#include <set>
+#include <mutex>
 #include "media_stream.h"
 #include "sdp/sdp.h"
 #include "util/port_range.h"
@@ -67,6 +69,15 @@ namespace rtpx {
 		// 设置本会话专属的 RTP 端口分配范围；不设置时使用 rtpx_core 的全局端口范围
 		void set_port_range(uint16_t min_port, uint16_t max_port);
 
+		// 从本会话端口范围取一个空闲端口并预留（不再发给后续媒体流），0 表示无可用端口。
+		// 供非 rtpx transport 的辅助 socket（如 BFCP）使用，保证与媒体流同一游标、互不冲突
+		uint16_t allocate_udp_port();
+		// 释放预留的端口
+		void release_port(uint16_t port);
+
+		// 本会话 transport 已占用的本地端口（供外部如 BFCP socket 选端口时避开）
+		std::vector<uint16_t> transport_ports() const;
+
 		void require_keyframe();
 		bool require_keyframe(const std::string& mid);
 	protected:
@@ -75,6 +86,10 @@ namespace rtpx {
 
 		transport_ptr create_transport(uint16_t port, bool security);
 		transport_ptr create_transport(uint16_t port, bool security, custom_transport::send_hander sender);
+		// 从端口范围取一个未被本会话占用的端口（0 表示无可用）。范围回绕后会再次发出
+		// 在用端口，必须跳过——否则 create_transport 会把既有 transport 静默"复用"给新流，
+		// 造成多流共用 socket、SDP 端口重复
+		uint16_t allocate_port(bool even);
 		void setup_transport(transport_ptr tp);
 		port_range& usable_ports();
 		transport_ptr get_transport(uint16_t port) const;
@@ -133,6 +148,8 @@ namespace rtpx {
 
 		bool has_own_ports_ = false;
 		port_range ports_;
+		std::mutex reserved_ports_mutex_;
+		std::set<uint16_t> reserved_ports_;   // allocate_udp_port 预留给辅助 socket 的端口
 
 		std::string ice_ufrag_;
 		std::string ice_pwd_;
