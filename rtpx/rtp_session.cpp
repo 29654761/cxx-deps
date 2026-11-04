@@ -348,13 +348,14 @@ namespace rtpx {
 				media_streams_.erase(itr);
 			}
 		}
-
-		try_remove_transport(ms->local_rtp_port());
-		if (ms->local_rtp_port()!= ms->local_rtcp_port())
+		if (ms)
 		{
-			try_remove_transport(ms->local_rtcp_port());
+			try_remove_transport(ms->local_rtp_port());
+			if (ms->local_rtp_port() != ms->local_rtcp_port())
+			{
+				try_remove_transport(ms->local_rtcp_port());
+			}
 		}
-
 		return true;
 	}
 

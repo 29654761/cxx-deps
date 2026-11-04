@@ -387,6 +387,30 @@ namespace voip
 				}
 				remove_media_stream("extend_video");
 			}
+			else
+			{
+				// 对端持有令牌时接收方无权替对端释放令牌（H.239），按 H.245 用
+				// RequestChannelClose 请求对端关闭辅流通道（参考 h323plus H245NegLogicalChannel::Close
+				// 对 IsFromRemote 通道的做法）；对端会回 Ack、关通道并回发令牌释放
+				bool requested = false;
+				{
+					std::lock_guard<std::recursive_mutex> lk(opened_remote_channels_mutex_);
+					for (auto itr = opened_remote_channels_.begin(); itr != opened_remote_channels_.end(); itr++)
+					{
+						if (itr->type == media_channel_type_t::extend)
+						{
+							this->send_request_channel_close(itr->channel_number, H245_RequestChannelClose_reason::e_normal);
+							requested = true;
+							break;
+						}
+					}
+				}
+				if (requested && log_)
+				{
+					std::string url = url_.to_string();
+					log_->info("H.323: release presentation by request channel close, url={}", url)->flush();
+				}
+			}
 		}
 
 		bool h323_call::has_presentation_role()
@@ -2293,6 +2317,11 @@ namespace voip
 					const H245_CloseLogicalChannel& body = (const H245_CloseLogicalChannel&)req;
 					on_close_logical_channel(body);
 				}
+				else if (req.GetTag() == H245_RequestMessage::e_requestChannelClose)
+				{
+					const H245_RequestChannelClose& body = (const H245_RequestChannelClose&)req;
+					on_request_channel_close(body);
+				}
 				else if (req.GetTag() == H245_RequestMessage::e_roundTripDelayRequest)
 				{
 					const H245_RoundTripDelayRequest& body = (const H245_RoundTripDelayRequest&)req;
@@ -3281,12 +3310,22 @@ namespace voip
 
 		void h323_call::on_close_logical_channel(const H245_CloseLogicalChannel& body)
 		{
+			// H.245 要求收到 CloseLogicalChannel 必须回应 CloseLogicalChannelAck（参考 h323plus
+			// H245NegLogicalChannels::HandleClose 无条件回应）。缺 Ack 时对端发送端停留在
+			// "等待关闭确认"状态：通道号不释放、辅流继续发流，且下次共享起不来新的 OLC
+			send_close_logical_channel_ack(body.m_forwardLogicalChannelNumber);
+
+			bool extend_closed = false;
 			{
 				std::lock_guard<std::recursive_mutex> lk(opened_remote_channels_mutex_);
 				for (auto itr = opened_remote_channels_.begin(); itr != opened_remote_channels_.end();)
 				{
 					if (itr->channel_number == body.m_forwardLogicalChannelNumber)
 					{
+						if (itr->type == media_channel_type_t::extend)
+						{
+							extend_closed = true;
+						}
 						if (on_close_media)
 						{
 							auto self = shared_from_this();
@@ -3301,11 +3340,70 @@ namespace voip
 					}
 				}
 			}
+			// 对端只关辅流通道而不发令牌释放时，同样清理"对端持有"状态，避免应用层停留在 active
+			if (extend_closed && h239_remote_owned_)
+			{
+				h239_remote_owned_ = false;
+				on_h239_presentation_role_changed(false, false);
+			}
 			if (log_)
 			{
 				std::string url = url_.to_string();
 				log_->debug("H.323: on_close_logical_channel ,url={}, chann={}",
 					url, (int)body.m_forwardLogicalChannelNumber)->flush();
+			}
+		}
+
+		void h323_call::on_request_channel_close(const H245_RequestChannelClose& body)
+		{
+			int channel_number = body.m_forwardLogicalChannelNumber;
+			// 对端（接收方）要求关闭我方发送的通道：H.245 要求必须回应 Ack 或 Reject
+			// （参考 h323plus H245NegLogicalChannel::HandleRequestClose：Ack + 正常关闭流程）
+			media_channel_t local_chann;
+			bool found = false;
+			{
+				std::lock_guard<std::recursive_mutex> lk(opened_local_channels_mutex_);
+				for (auto itr = opened_local_channels_.begin(); itr != opened_local_channels_.end();)
+				{
+					if (itr->channel_number == channel_number)
+					{
+						local_chann = *itr;
+						found = true;
+						itr = opened_local_channels_.erase(itr);
+					}
+					else
+					{
+						itr++;
+					}
+				}
+			}
+			if (!found)
+			{
+				send_request_channel_close_reject(channel_number, H245_RequestChannelCloseReject_cause::e_unspecified);
+				if (log_)
+				{
+					std::string url = url_.to_string();
+					log_->warn("H.323: on_request_channel_close: channel not exist, url={}, chann={}", url, channel_number)->flush();
+				}
+				return;
+			}
+			send_request_channel_close_ack(channel_number);
+			send_close_logical_channel(channel_number, H245_CloseLogicalChannel_reason::e_unknown);
+			// 被关的是我方辅流发送通道（我方持令牌）时，按 H.239 同步释放令牌
+			if (local_chann.type == media_channel_type_t::extend && h239_token_owned_)
+			{
+				h239_token_owned_ = false;
+				send_h239_presentation_release(h239_token_channel_, h239_terminal_label_);
+				h239_token_channel_ = 0;
+				h239_terminal_label_ = 0;
+				h239_symmetry_breaking_ = 0;
+				on_h239_presentation_role_changed(true, false);
+				remove_media_stream("extend_video");
+			}
+			if (log_)
+			{
+				std::string url = url_.to_string();
+				log_->debug("H.323: on_request_channel_close, url={}, chann={}", url, channel_number)->flush();
 			}
 		}
 
@@ -3432,6 +3530,12 @@ namespace voip
 		void h323_call::on_h239_flow_control_release_request(unsigned logical_channel, unsigned bit_rate)
 		{
 			send_h239_flow_control_release_response(logical_channel, true);
+			// H.239 §11.3 强制释放：令牌持有方回应 Ack 后必须真正释放令牌并关闭辅流通道，
+			// 此前只回 Ack 不释放，对端视角令牌一直未交还
+			if (h239_token_owned_)
+			{
+				this->release_presentation_role();
+			}
 		}
 
 		void h323_call::on_h239_flow_control_release_response(unsigned logical_channel, bool rejected)

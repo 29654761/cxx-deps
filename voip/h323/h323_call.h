@@ -201,6 +201,7 @@ namespace voip
 			void on_open_logical_channel_ack(const H245_OpenLogicalChannelAck& body);
 			void on_open_logical_channel_reject(const H245_OpenLogicalChannelReject& body);
 			void on_close_logical_channel(const H245_CloseLogicalChannel& body);
+			void on_request_channel_close(const H245_RequestChannelClose& body);
 			void on_round_trip_delay_request(const H245_RoundTripDelayRequest& body);
 
 			void on_miscellaneous_command(const H245_MiscellaneousCommand& body);
