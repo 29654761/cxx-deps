@@ -507,8 +507,10 @@ void rtc_client::s_rtc_user_event_callback(
 
 	if (event_type == 0)
 	{
-		p->ios_.post([p,uid]() {
-			p->set_subscribe_result(uid, nullptr, track_type_t::unknown,false);
+		// uid 由 SDK 持有，回调返回后可能失效，拷贝后再交给异步任务
+		std::string uid_str = uid;
+		p->ios_.post([p, uid_str]() {
+			p->set_subscribe_result(uid_str.c_str(), nullptr, track_type_t::unknown,false);
 		});
 	}
 
@@ -525,10 +527,13 @@ void rtc_client::s_rtc_track_event_callback(
 	rtc_client* p = (rtc_client*)context;
 	if (event_type == 0)
 	{
-		p->ios_.post([p, uid, track_info]() {
-			p->set_subscribe_result(uid, track_info->desc,track_type_t::tdesc, false);
+		// uid / track_info 由 SDK 持有，回调返回后可能失效，拷贝后再交给异步任务
+		std::string uid_str = uid;
+		std::string desc_str = track_info->desc;
+		p->ios_.post([p, uid_str, desc_str]() {
+			p->set_subscribe_result(uid_str.c_str(), desc_str.c_str(), track_type_t::tdesc, false);
 		});
-		
+
 	}
 
 	p->track_event.invoke(uid, track_info, event_type);
