@@ -51,6 +51,16 @@ namespace rtpx
 		return true;
 	}
 
+	bool sender::send_telephone_event(uint8_t pt, uint32_t timestamp, const uint8_t payload[4], bool marker)
+	{
+		std::unique_lock<std::shared_mutex>lk(mutex_);
+		packet_ptr pkt = std::make_shared<packet>(pt, ssrc_, seq_, timestamp);
+		// RFC 4733 2.5.1.2：一次按键的第一个包置 marker 位
+		pkt->mutable_header()->m = marker ? 1 : 0;
+		pkt->set_payload(payload, 4);
+		return this->send_packet(pkt);
+	}
+
 	uint16_t sender::last_rtp_seq()
 	{
 		std::shared_lock<std::shared_mutex>lk(mutex_);

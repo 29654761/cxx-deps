@@ -33,6 +33,11 @@ namespace rtpx
 
 		virtual bool send_frame(const uint8_t* frame, uint32_t size, uint32_t duration) = 0;
 		virtual bool send_packet(packet_ptr pkt);
+		// 发一个 RFC 4733 telephone-event 包（4 字节负载由调用方组好）。
+		// 按键事件与音频共用同一个 SSRC，序号必须与音频连续，所以借用音频发送器的序号空间发送；
+		// pt 用对端 SDP 里 telephone-event 的负载类型，timestamp 为本次按键起始时刻的音频时间戳（同一按键的所有包都相同），
+		// 不推进本发送器的音频时间戳
+		bool send_telephone_event(uint8_t pt, uint32_t timestamp, const uint8_t payload[4], bool marker);
 
 		uint32_t ssrc()const { return ssrc_; }
 		const sdp_format& format()const { return format_; }

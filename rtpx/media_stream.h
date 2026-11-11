@@ -70,6 +70,12 @@ namespace rtpx {
 
 		bool send_frame(uint8_t pt,const uint8_t* frame, uint32_t size, uint32_t duration);
 		bool send_rtp_packet(packet_ptr packet);
+		// 发 RFC 4733 按键事件包：借用 audio_pt 对应音频发送器的 SSRC 与序号空间，负载类型用 te_pt。
+		// event 为事件码（0-9、10=*、11=#、12-15=A-D），duration 为从按键开始到现在的时长（时间戳单位），
+		// end 为结束包标记；同一次按键的所有包 timestamp 相同
+		bool send_telephone_event(uint8_t audio_pt, uint8_t te_pt, uint32_t timestamp, uint8_t event, uint16_t duration, bool end, bool marker);
+		// 取 pt 对应发送器当前的 RTP 时间戳（发送器不存在时按本地格式创建），用作按键事件的起始时间戳
+		bool sender_rtp_timestamp(uint8_t pt, uint32_t& timestamp);
 		bool send_rtcp_packet(const uint8_t* rtcp_data, int size);
 		bool send_data_channel(const uint8_t* data, int size);
 
