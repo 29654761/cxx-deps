@@ -333,6 +333,11 @@ namespace voip
 		{
 			return false;
 		}
+		// 带内按键要合成进音频，本类不经手 PCM，交给调用方
+		if (dtmf_method() == dtmf_method_t::inband)
+		{
+			return false;
+		}
 
 		bool start = false;
 		{

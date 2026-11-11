@@ -2762,6 +2762,7 @@ namespace voip
 
 			remote_channels_.clear();
 			bool remote_ui_dtmf = false;
+			bool remote_ui_any = false;
 			for (PINDEX i = 0; i < body.m_capabilityTable.GetSize(); i++)
 			{
 				media_channel_t remote_chann;
@@ -2835,8 +2836,9 @@ namespace voip
 					else if (entry.m_capability.GetTag() == H245_Capability::e_receiveUserInputCapability
 						|| entry.m_capability.GetTag() == H245_Capability::e_receiveAndTransmitUserInputCapability)
 					{
-						// 只记录对端能否收 dtmf 形式的按键，用于发按键时选 signal / alphanumeric；不影响媒体通道
+						// 只记录对端收不收、能否收 dtmf 形式的按键，用于选发送方式（见 dtmf_method）；不影响媒体通道
 						const H245_UserInputCapability& ui = (const H245_UserInputCapability&)entry.m_capability;
+						remote_ui_any = true;
 						if (ui.GetTag() == H245_UserInputCapability::e_dtmf)
 						{
 							remote_ui_dtmf = true;
@@ -2861,6 +2863,11 @@ namespace voip
 			}
 
 			remote_ui_dtmf_ = remote_ui_dtmf;
+			remote_ui_any_ = remote_ui_any;
+			if (log_)
+			{
+				log_->info("H.323: remote user input capability: any={} dtmf={}, url={}", remote_ui_any, remote_ui_dtmf, url_.to_string())->flush();
+			}
 			this->send_terminal_capability_set_ack(body.m_sequenceNumber);
 			rtp_->start();
 			tcs_ready_ = true;

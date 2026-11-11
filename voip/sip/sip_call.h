@@ -83,9 +83,10 @@ namespace voip
 			bool options();
 			// 发对话内 INFO 请求（目前用于按键）
 			bool info(const std::string& content_type, const std::string& body);
-		protected:
+		public:
 			// 按键：对端协商了 telephone-event 走 RFC 4733，否则 SIP INFO（application/dtmf-relay）
 			virtual dtmf_method_t dtmf_method();
+		protected:
 			virtual bool send_dtmf_signaling(char digit, int duration_ms);
 		private:
 			void make_contact(sip_address& contact);

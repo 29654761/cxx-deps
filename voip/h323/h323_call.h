@@ -144,9 +144,11 @@ namespace voip
 			bool send_flow_control_indication();
 			// H.245 UserInputIndication 发一个按键：对端能力集声明了 dtmf 用 signal（带时长），否则用 alphanumeric
 			bool send_user_input_indication(char digit, int duration_ms);
+		public:
+			// 对端能力集声明了任意 UserInput 能力 → H.245 UserInputIndication；一项都没声明（如小鱼易连）
+			// 说明它不收信令按键，只听音频里的双音 → inband。不走 RTP telephone-event（H.323 很少协商它）
+			virtual dtmf_method_t dtmf_method() { return remote_ui_any_ ? dtmf_method_t::signaling : dtmf_method_t::inband; }
 		protected:
-			// 按键一律走 H.245 UserInputIndication（H.323 终端/MCU 普遍只认这个，不协商 RTP telephone-event）
-			virtual dtmf_method_t dtmf_method() { return dtmf_method_t::signaling; }
 			virtual bool send_dtmf_signaling(char digit, int duration_ms) { return send_user_input_indication(digit, duration_ms); }
 		private:
 
@@ -297,6 +299,7 @@ namespace voip
 			bool h239_remote_owned_ = false;            // 对端持有令牌（我方已 ack 对端请求或收到 OwnerIndication）
 
 			std::atomic<bool> remote_ui_dtmf_{ false };	// 对端能力集声明了 UserInput dtmf（可收 signal 形式的按键）
+			std::atomic<bool> remote_ui_any_{ false };	// 对端能力集声明了任意 UserInput 能力（收不收信令按键）
 			bool tcs_ready_ = false;   //terminal_capability 是否完成, tcs交互只需要收到对方的能力集就可以进行推流了，不需要等双方完成
 			bool msd_sent_ = false;   //对方已经回复了master_slave_determination_ack, 表示我已经发送成功
 			bool msd_recv_ = true;   //我已经收到了对方的master_slave_determination，并且已经回复了ack

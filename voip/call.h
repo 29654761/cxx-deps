@@ -106,8 +106,21 @@ namespace voip
 		// digits：只接受 0-9 * # A-D（小写 a-d 转大写），逗号 ',' 表示停顿 500ms（等对端语音提示），其它字符忽略。
 		// duration_ms：每个键的按下时长，限制在 [40, 1000]，键与键之间另有 100ms 间隔。
 		// 发送方式由子类按协商结果决定（见 dtmf_method）：SIP 优先 RFC 4733、否则 SIP INFO；H.323 走 H.245 UserInputIndication。
-		// 返回 false 表示 digits 里没有可发送的按键、通话未接通或已结束
+		// 返回 false 表示 digits 里没有可发送的按键、通话未接通或已结束，或 dtmf_method() 为 inband（须由调用方合成音频）
 		bool send_dtmf(const std::string& digits, int duration_ms = 160);
+
+		// 发按键的方式
+		enum class dtmf_method_t
+		{
+			none,		// 发不了（未协商 telephone-event 且子类没有信令方式）
+			rfc4733,	// RTP telephone-event 事件包
+			signaling,	// 信令：SIP INFO / H.245 UserInputIndication
+			inband,		// 带内：把双音多频音混进发给对端的音频。对端不收信令按键时用（如小鱼易连 H.323 IVR），
+						// 音频由上层（devgate）编码发送，本类拿不到 PCM，所以由调用方合成，send_dtmf 直接返回 false
+		};
+		// 选择发按键的方式。默认：对端 SDP 协商了 telephone-event 就走 RFC 4733，否则 none；子类可覆盖。
+		// 上层据此决定调 send_dtmf 还是自己在音频里合成按键音
+		virtual dtmf_method_t dtmf_method();
 
 		bool is_inactive()const;
 		void update();
@@ -128,15 +141,6 @@ namespace voip
 		// 统一的按键出口：过滤非法字符后回调 on_dtmf
 		void invoke_dtmf(char digit, int duration_ms);
 
-		// 发按键的方式
-		enum class dtmf_method_t
-		{
-			none,		// 发不了（未协商 telephone-event 且子类没有信令方式）
-			rfc4733,	// RTP telephone-event 事件包
-			signaling,	// 信令：SIP INFO / H.245 UserInputIndication
-		};
-		// 选择发按键的方式。默认：对端 SDP 协商了 telephone-event 就走 RFC 4733，否则 none；子类可覆盖
-		virtual dtmf_method_t dtmf_method();
 		// 走信令发一个按键，由子类实现；默认不支持
 		virtual bool send_dtmf_signaling(char digit, int duration_ms) { return false; }
 		// 停止发按键：清空待发队列并取消定时器（通话结束时由子类 stop() 调用）
