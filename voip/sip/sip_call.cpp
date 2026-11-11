@@ -346,6 +346,9 @@ namespace voip
 			url_.parse(invite_.url());
 
 			invite_.headers.get("Record-Route", record_route_);
+
+			// 对端 Contact（远程目标）：后续 ACK/BYE/OPTIONS 的 Request-Line 用它构造
+			remote_target_ = invite_.contact().url;
 			return true;
 		}
 
@@ -578,6 +581,48 @@ namespace voip
 				{
 					remote_alias_ = remote_contact.display;
 				}
+				// 对端目标地址随 1xx 响应的 Contact 刷新
+				remote_target_ = remote_contact.url;
+			}
+
+			if (on_remote_ringing)
+			{
+				auto self = shared_from_this();
+				on_remote_ringing(self);
+			}
+		}
+
+		// 对端 183（Session Progress）：呼叫仍在进行，不能按失败挂断。
+		// 正文常携带早媒体 SDP（回铃音/彩铃），按 answer 应用以便提前收流；
+		// 状态通知复用 on_remote_ringing（部分对端只发 183 不发 180）
+		void sip_call::on_progress(const sip_message& msg)
+		{
+			sip_address remote_contact;
+			if (msg.contact(remote_contact))
+			{
+				remote_alias_ = remote_contact.url.username;
+				if (remote_alias_.empty())
+				{
+					remote_alias_ = remote_contact.display;
+				}
+				// 对端目标地址随 1xx 响应的 Contact 刷新
+				remote_target_ = remote_contact.url;
+			}
+
+			// 对端 tag 随首个带 tag 的响应确立，供后续 ACK/BYE 组包使用（与 200 路径一致）
+			msg.to().get("tag", other_tag_);
+
+			// 早媒体按 answer 应用，set_remote_sdp 内部会启动收流；
+			// BFCP 等最终协商仍以 200 的 answer 为准，这里不处理
+			rtpx::sdp sdp;
+			if (sdp.parse(msg.body))
+			{
+				ensure_setup(sdp, sdp_type_answer);
+				rtp_->set_remote_sdp(sdp, sdp_type_answer);
+				if (log_)
+				{
+					log_->info("SIP early media SDP applied from 183")->flush();
+				}
 			}
 
 			if (on_remote_ringing)
@@ -742,6 +787,19 @@ namespace voip
 			std::string method;
 			msg.get_cseq(cseq, method);
 			std::string status = msg.status();
+
+			// 1xx 临时响应：呼叫仍在建立，不能按失败挂断。
+			// 100/180 已由 endpoint 分发到 on_trying/on_ringing，这里兜住 183 及其余 1xx
+			if (status.size() == 3 && status[0] == '1')
+			{
+				// 183 仅对 INVITE 有意义（早媒体/呼叫进行中）
+				if (status == "183" && strcasecmp(method.c_str(), "INVITE") == 0)
+				{
+					on_progress(msg);
+				}
+				return;
+			}
+
 			if (status != "200")
 			{
 				if (log_)
@@ -774,6 +832,8 @@ namespace voip
 					{
 						remote_alias_ = remote_contact.display;
 					}
+					// 200 OK 的 Contact 即远程目标，后续 ACK/BYE/OPTIONS 的 Request-Line 用它构造
+					remote_target_ = remote_contact.url;
 				}
 				msg.headers.get("Record-Route", record_route_);
 
@@ -936,7 +996,8 @@ namespace voip
 			}
 			else
 			{
-				url = url_;
+				// Request-Line 用对端 Contact（远程目标），不能用代理地址，否则代理不知道转发给谁
+				url = remote_target_uri();
 
 				from.url.username = local_alias_;
 				from.url.host = nat_address_;
@@ -1026,7 +1087,14 @@ namespace voip
 			uint32_t cseq = msg.get_cseq();
 			std::vector<sip_via> vias;
 			vias.emplace_back(con->is_tcp(), nat_address_, local_port_, "", 0, endpoint::create_branch());
-			sip_message req = ep_->create_request("ACK", url_, cseq,  from,to,&contact,vias, false);
+			// 2xx 的 ACK Request-Line 用响应里的对端 Contact（远程目标）；
+			// 非 2xx 的 ACK（如 603 后）按 RFC 3261 仍用原 INVITE 的 Request-URI
+			voip_uri target = url_;
+			if (msg.status() == "200" && !remote_target_.host.empty())
+			{
+				target = remote_target_;
+			}
+			sip_message req = ep_->create_request("ACK", target, cseq,  from,to,&contact,vias, false);
 			req.set_call_id(call_id_);
 			req.set_from(msg.from());
 			req.set_to(msg.to());
@@ -1071,7 +1139,8 @@ namespace voip
 			}
 			else
 			{
-				url = url_;
+				// Request-Line 用对端 Contact（远程目标），不能用代理地址，否则代理不知道转发给谁
+				url = remote_target_uri();
 
 				from.url.username = local_alias_;
 				from.url.host = nat_address_;
@@ -1092,10 +1161,24 @@ namespace voip
 			std::vector<sip_via> vias;
 			vias.emplace_back(con->is_tcp(), nat_address_, local_port_, "", 0, endpoint::create_branch());
 
-			sip_message req = ep_->create_request("OPTIONS", url_, cseq, from, to, &contact,vias, true);
+			sip_message req = ep_->create_request("OPTIONS", url, cseq, from, to, &contact,vias, true);
 			req.set_call_id(call_id_);
-
+			// OPTIONS 与 ACK/BYE 一致填充 Route（Record-Route 路由集），否则代理可能不转发
+			for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+			{
+				req.headers.add("Route", *itr);
+			}
 			return con->send_message(req);
+		}
+
+		voip_uri sip_call::remote_target_uri()const
+		{
+			// 对端 Contact（远程目标）尚未建立时回落到原请求 URI
+			if (!remote_target_.host.empty())
+			{
+				return remote_target_;
+			}
+			return url_;
 		}
 
 		void sip_call::make_contact(sip_address& contact)

@@ -753,12 +753,12 @@ namespace rtpx {
 			if (security_)
 			{
 				local_sdp.protos.insert("TLS");
-				local_sdp.protos.insert("SAVPF");
+				//local_sdp.protos.insert("SAVPF");
 			}
 			else
 			{
 				local_sdp.protos.insert("AVP");
-				local_sdp.protos.insert("AVPF");
+				//local_sdp.protos.insert("AVPF");
 			}
 			local_sdp.msid_sid = msid_sid_;
 			local_sdp.msid_tid = msid_tid_;

@@ -83,7 +83,13 @@ namespace voip
 			bool options();
 		private:
 			void make_contact(sip_address& contact);
+			// 对话内后续请求（ACK/BYE/OPTIONS）的 Request-Line 目标（RFC 3261 远程目标）：
+			// 优先用对端 Contact 地址（穿透代理场景下，代理不会转发以代理地址为目标的请求），
+			// 对话尚未建立时回落到原请求 URI
+			voip_uri remote_target_uri()const;
 			uint32_t get_cseq();
+			// 对端 183（Session Progress）处理：应用早媒体 SDP 并通知呼叫进行中
+			void on_progress(const sip_message& msg);
 			void handle_timer(call_ptr call,const std::error_code& ec);
 			void handle_sipcon_close(call_ptr call, sip_connection_ptr con);
 
@@ -120,6 +126,10 @@ namespace voip
 			std::string my_tag_;
 			std::string other_tag_;
 			std::vector<std::string> record_route_;
+
+			// 对端 Contact 地址（RFC 3261 远程目标）：入呼叫取 INVITE 的 Contact，
+			// 出呼叫随对端 180/183/200 响应的 Contact 刷新，供后续 ACK/BYE/OPTIONS 组 Request-Line
+			voip_uri remote_target_;
 
 			sip_message invite_;
 

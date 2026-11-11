@@ -36,7 +36,7 @@ namespace rtpx {
 		// mid, sid, tid, event (0-9=digits 10=* 11=# 12-15=A-D 16=flash), duration_ms
 		typedef std::function<void(const std::string&, const std::string&, const std::string&, uint8_t, uint32_t)> dtmf_handler;
 
-		rtp_session(asio::io_context& ioc, spdlogger_ptr log,bool stun=true,bool is_port_mux=false);
+		rtp_session(asio::io_context& ioc, spdlogger_ptr log,bool stun=true,bool is_port_mux=false,bool ice=false);
 		~rtp_session();
 
 		//The start whill be called by create_answer or set_remote_sdp

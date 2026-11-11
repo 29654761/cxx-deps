@@ -11,16 +11,19 @@
 
 namespace rtpx {
 
-	rtp_session::rtp_session(asio::io_context& ioc,spdlogger_ptr log, bool stun, bool is_port_mux)
+	rtp_session::rtp_session(asio::io_context& ioc,spdlogger_ptr log, bool stun, bool is_port_mux,bool ice)
 		:ioc_(ioc), timer_(ioc), active_(false)
 	{
 		log_ = log;
 		stun_ = stun;
 		is_port_mux_ = is_port_mux;
 		cname_ = sys::util::random_string(20);
-		ice_ufrag_ = sys::util::random_string(5);
-		ice_pwd_ = sys::util::random_string(25);
-		ice_options_ = "trickle";
+
+		if (ice) {
+			ice_ufrag_ = sys::util::random_string(5);
+			ice_pwd_ = sys::util::random_string(25);
+			ice_options_ = "trickle";
+		}
 	}
 
 	rtp_session::~rtp_session()
