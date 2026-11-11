@@ -851,6 +851,39 @@ namespace rtpx {
 		return sender->send_frame(frame, size, duration);
 	}
 
+	bool media_stream::send_telephone_event(uint8_t audio_pt, uint8_t te_pt, uint32_t timestamp, uint8_t event, uint16_t duration, bool end, bool marker)
+	{
+		auto tm = trans_mode();
+		if (tm != rtp_trans_mode_sendonly && tm != rtp_trans_mode_sendrecv)
+			return false;
+
+		auto sender = get_sender(audio_pt);
+		if (!sender)
+		{
+			return false;
+		}
+
+		// RFC 4733 2.3 负载：event(8) | E(1) R(1) volume(6) | duration(16, 网络字节序)
+		// volume 取 10，即 -10 dBm0（常见实现的默认值）
+		uint8_t payload[4];
+		payload[0] = event;
+		payload[1] = (uint8_t)((end ? 0x80 : 0x00) | 10);
+		payload[2] = (uint8_t)(duration >> 8);
+		payload[3] = (uint8_t)(duration & 0xFF);
+		return sender->send_telephone_event(te_pt, timestamp, payload, marker);
+	}
+
+	bool media_stream::sender_rtp_timestamp(uint8_t pt, uint32_t& timestamp)
+	{
+		auto sender = get_sender(pt);
+		if (!sender)
+		{
+			return false;
+		}
+		timestamp = sender->last_rtp_timestamp();
+		return true;
+	}
+
 	bool media_stream::send_rtp_packet(packet_ptr packet)
 	{
 		asio::ip::udp::endpoint ep;

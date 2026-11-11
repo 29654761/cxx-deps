@@ -1,5 +1,7 @@
 #pragma once
 #include <asio.hpp>
+#include <deque>
+#include <mutex>
 #include <rtpx/rtp_session.h>
 #include <sip/voip_uri.h>
 #include <spdlog/spdlogger.hpp>
@@ -100,6 +102,13 @@ namespace voip
 		bool send_video_frame(const uint8_t* frame, uint32_t size, uint32_t duration,bool is_extend);
 		bool send_audio_frame(const uint8_t* frame, uint32_t size, uint32_t duration);
 
+		// 向对端发送按键（DTMF），立即返回，按键在后台按顺序逐个发出。
+		// digits：只接受 0-9 * # A-D（小写 a-d 转大写），逗号 ',' 表示停顿 500ms（等对端语音提示），其它字符忽略。
+		// duration_ms：每个键的按下时长，限制在 [40, 1000]，键与键之间另有 100ms 间隔。
+		// 发送方式由子类按协商结果决定（见 dtmf_method）：SIP 优先 RFC 4733、否则 SIP INFO；H.323 走 H.245 UserInputIndication。
+		// 返回 false 表示 digits 里没有可发送的按键、通话未接通或已结束
+		bool send_dtmf(const std::string& digits, int duration_ms = 160);
+
 		bool is_inactive()const;
 		void update();
 		void set_max_bitrate(int v) { max_bitrate_ = v; }
@@ -118,6 +127,20 @@ namespace voip
 		void invoke_hangup(reason_code_t reason);
 		// 统一的按键出口：过滤非法字符后回调 on_dtmf
 		void invoke_dtmf(char digit, int duration_ms);
+
+		// 发按键的方式
+		enum class dtmf_method_t
+		{
+			none,		// 发不了（未协商 telephone-event 且子类没有信令方式）
+			rfc4733,	// RTP telephone-event 事件包
+			signaling,	// 信令：SIP INFO / H.245 UserInputIndication
+		};
+		// 选择发按键的方式。默认：对端 SDP 协商了 telephone-event 就走 RFC 4733，否则 none；子类可覆盖
+		virtual dtmf_method_t dtmf_method();
+		// 走信令发一个按键，由子类实现；默认不支持
+		virtual bool send_dtmf_signaling(char digit, int duration_ms) { return false; }
+		// 停止发按键：清空待发队列并取消定时器（通话结束时由子类 stop() 调用）
+		void cancel_dtmf();
 	private:
 		// rtpx 回调桥接，转发到公开的 on_frame / on_received_require_keyframe / on_dtmf
 		void on_rtpx_frame(const std::string& mid, const std::string& sid, const std::string& tid, const rtpx::sdp_format& fmt, const av_frame_t& frame);
@@ -129,6 +152,15 @@ namespace voip
 		// 进程内注册一次默认能力集（PCMA/PCMU/telephone-event/H264/H265）。
 		// offer 从能力集生成，answer 只保留对端 offer 与能力集的交集（见 rtpx::media_capabilities）
 		static void register_default_capabilities();
+
+		// 发按键的调度：取队列下一个键开始发送；队列空则结束
+		void dtmf_next();
+		// RFC 4733 一个键开始发送：确定音频流、PT 与起始时间戳。失败返回 false（调用方改走信令）
+		bool dtmf_rfc4733_begin(char digit, int duration_ms);
+		// RFC 4733 每 50ms 一拍：按键未结束发更新包，到时长后连发 3 个结束包并转下一个键
+		void dtmf_rfc4733_tick();
+		// delay_ms 后在 io 线程上执行 fn（持弱引用，通话销毁后不再执行）
+		void dtmf_schedule(int delay_ms, void (call::*fn)());
 
 	protected:
 		on_ringing_t on_remote_ringing;
@@ -165,6 +197,36 @@ namespace voip
 		std::atomic<bool> triggered_connected_;
 
 		bool use_rtp_address_ = false;
+
+	private:
+		// ---------- 发按键（send_dtmf）----------
+		// 待发的一个按键；digit 为 ',' 时表示停顿
+		struct dtmf_tone_t
+		{
+			char digit;
+			int duration_ms;
+		};
+		std::mutex dtmf_mutex_;					// 保护 dtmf_queue_ / dtmf_running_ / dtmf_closed_ / dtmf_gen_ / dtmf_timer_
+		std::deque<dtmf_tone_t> dtmf_queue_;	// 待发按键，按调用顺序
+		bool dtmf_running_ = false;				// 是否已有发送链在跑（同一时刻只有一条定时器链，天然串行）
+		bool dtmf_closed_ = false;				// cancel_dtmf 后置 true，不再接受新按键
+		uint32_t dtmf_gen_ = 0;					// 发送链代际号，cancel_dtmf 时加一，让已出队的旧回调失效
+		asio::steady_timer dtmf_timer_;
+
+		// 正在发送的 RFC 4733 按键，只在定时器链上访问
+		struct dtmf_rfc4733_t
+		{
+			rtpx::media_stream_ptr ms;	// 音频流
+			uint8_t audio_pt = 0;		// 借用其发送器的 SSRC/序号
+			uint8_t te_pt = 0;			// 对端 telephone-event 的负载类型
+			int ts_per_ms = 8;			// 每毫秒的时间戳单位数（telephone-event 一般 8000Hz）
+			uint8_t event = 0;			// 事件码
+			uint32_t timestamp = 0;		// 本次按键起始时间戳
+			int duration_ms = 0;		// 按下时长
+			int elapsed_ms = 0;			// 已发送时长
+		} te_;
+		bool te_has_last_ = false;		// 是否发过按键
+		uint32_t te_last_end_ts_ = 0;	// 上一个按键结束时的时间戳：音频没在发时时间戳不动，新按键起点不能与上一个重合，否则对端按时间戳去重会吞键
 	};
 
 	

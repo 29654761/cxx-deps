@@ -254,6 +254,7 @@ namespace voip
 				if (!active_.compare_exchange_strong(experted, false))
 					return;
 
+				cancel_dtmf();
 				rtp_->stop();
 				std::error_code ec;
 				timer_.cancel(ec);
@@ -1407,6 +1408,40 @@ namespace voip
 			body.m_scope = 2;
 			body.m_restriction.SetTag(H245_FlowControlIndication_restriction::e_maximumBitRate);
 			body.m_restriction = 640;
+
+			PPER_Stream stream;
+			msg.Encode(stream);
+			stream.CompleteEncoding();
+			PBYTEArray buf = tpkt::serialize(stream);
+			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+		}
+
+		bool h323_call::send_user_input_indication(char digit, int duration_ms)
+		{
+			if (!h245_skt_)
+				return false;
+
+			H245_MultimediaSystemControlMessage msg;
+			msg.SetTag(H245_MultimediaSystemControlMessage::e_indication);
+			H245_IndicationMessage& ind = (H245_IndicationMessage&)msg;
+			ind.SetTag(H245_IndicationMessage::e_userInput);
+			H245_UserInputIndication& body = (H245_UserInputIndication&)ind;
+
+			// 与 on_user_input_indication 的两种接收格式对应
+			if (remote_ui_dtmf_)
+			{
+				body.SetTag(H245_UserInputIndication::e_signal);
+				H245_UserInputIndication_signal& sig = (H245_UserInputIndication_signal&)body;
+				sig.m_signalType = PString(digit);
+				sig.IncludeOptionalField(H245_UserInputIndication_signal::e_duration);
+				sig.m_duration = (unsigned)duration_ms;		// 1~65535 毫秒
+			}
+			else
+			{
+				body.SetTag(H245_UserInputIndication::e_alphanumeric);
+				PASN_GeneralString& str = (PASN_GeneralString&)body;
+				str = PString(digit);
+			}
 
 			PPER_Stream stream;
 			msg.Encode(stream);
@@ -2726,6 +2761,7 @@ namespace voip
 			}
 
 			remote_channels_.clear();
+			bool remote_ui_dtmf = false;
 			for (PINDEX i = 0; i < body.m_capabilityTable.GetSize(); i++)
 			{
 				media_channel_t remote_chann;
@@ -2796,6 +2832,16 @@ namespace voip
 							 }
 						 }
 					}
+					else if (entry.m_capability.GetTag() == H245_Capability::e_receiveUserInputCapability
+						|| entry.m_capability.GetTag() == H245_Capability::e_receiveAndTransmitUserInputCapability)
+					{
+						// 只记录对端能否收 dtmf 形式的按键，用于发按键时选 signal / alphanumeric；不影响媒体通道
+						const H245_UserInputCapability& ui = (const H245_UserInputCapability&)entry.m_capability;
+						if (ui.GetTag() == H245_UserInputCapability::e_dtmf)
+						{
+							remote_ui_dtmf = true;
+						}
+					}
 					else if (entry.m_capability.GetTag() == H245_Capability::e_genericControlCapability)
 					{
 						remote_chann.media_type = media_type_unknown;
@@ -2814,6 +2860,7 @@ namespace voip
 				remote_channels_.push_back(remote_chann);
 			}
 
+			remote_ui_dtmf_ = remote_ui_dtmf;
 			this->send_terminal_capability_set_ack(body.m_sequenceNumber);
 			rtp_->start();
 			tcs_ready_ = true;

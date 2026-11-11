@@ -289,6 +289,7 @@ namespace voip
 			if (!active_.compare_exchange_strong(experted, false))
 				return;
 
+			cancel_dtmf();
 			rtp_->stop();
 			stop_bfcp();
 			std::error_code ec;
@@ -753,7 +754,8 @@ namespace voip
 				uint32_t seq = 0;
 				std::string method;
 				msg.get_cseq(seq, method);
-				if (method != "OPTIONS")
+				// OPTIONS 心跳与 INFO 按键被拒（如 415/501 不支持）不影响通话，不挂断
+				if (method != "OPTIONS" && method != "INFO")
 				{
 					if (on_hangup)
 					{
@@ -1095,6 +1097,79 @@ namespace voip
 			sip_message req = ep_->create_request("OPTIONS", url_, cseq, from, to, &contact,vias, true);
 			req.set_call_id(call_id_);
 
+			return con->send_message(req);
+		}
+
+		call::dtmf_method_t sip_call::dtmf_method()
+		{
+			// 对端 SDP 协商了 telephone-event 走 RFC 4733，否则退回 SIP INFO
+			auto method = call::dtmf_method();
+			return method == dtmf_method_t::rfc4733 ? method : dtmf_method_t::signaling;
+		}
+
+		bool sip_call::send_dtmf_signaling(char digit, int duration_ms)
+		{
+			// 与 parse_info_dtmf 对应：application/dtmf-relay，"Signal=5\r\nDuration=160\r\n"
+			std::string body = std::string("Signal=") + digit + "\r\nDuration=" + std::to_string(duration_ms) + "\r\n";
+			return info("application/dtmf-relay", body);
+		}
+
+		bool sip_call::info(const std::string& content_type, const std::string& body)
+		{
+			auto con = get_con();
+			if (!con)
+				return false;
+
+			uint32_t cseq = get_cseq();
+
+			// 对话内请求，From/To/请求地址与 bye() 一致
+			sip_address from, to;
+			voip_uri url;
+			if (direction_ == direction_t::incoming)
+			{
+				url = invite_.contact().url;
+
+				from.url = url_;
+				if (!my_tag_.empty()) {
+					from.set("tag", my_tag_);
+				}
+
+				to = invite_.from();
+				if (!other_tag_.empty()) {
+					to.set("tag", other_tag_);
+				}
+			}
+			else
+			{
+				url = url_;
+
+				from.url.username = local_alias_;
+				from.url.host = nat_address_;
+				from.url.port = local_port_;
+				if (!my_tag_.empty()) {
+					from.set("tag", my_tag_);
+				}
+
+				to.url = url_;
+				if (!other_tag_.empty()) {
+					to.set("tag", other_tag_);
+				}
+			}
+
+			sip_address contact;
+			make_contact(contact);
+
+			std::vector<sip_via> vias;
+			vias.emplace_back(con->is_tcp(), nat_address_, local_port_, "", 0, endpoint::create_branch());
+
+			sip_message req = ep_->create_request("INFO", url, cseq, from, to, &contact, vias, false);
+			req.set_call_id(call_id_);
+			for (auto itr = record_route_.begin(); itr != record_route_.end(); itr++)
+			{
+				req.headers.add("Route", *itr);
+			}
+			req.set_content_type(content_type);
+			req.set_body(body);
 			return con->send_message(req);
 		}
 
