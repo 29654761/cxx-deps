@@ -170,6 +170,44 @@ namespace rtpx
 
 		packet_ptr first_pkt;
 		std::string fu_frame_data;
+
+		// 同一帧（find_a_frame 按 marker 收齐的一组包）里的所有 NAL 先按 Annex-B 拼成一个访问单元，最后只回调一次。
+		// 原先逐 NAL 回调，多 slice 帧（如小鱼 H.239 辅流每帧上下两个 slice）会被下游当成多帧：
+		// 同一 pts 写两次、每次各带 marker，接收端把上半帧当整帧，下半部分花屏
+		std::string au_data;   // 当前访问单元的 Annex-B 数据
+		int64_t au_pts = 0;    // 当前访问单元的 pts
+		bool au_has = false;   // au_data 里是否有待回调的 NAL
+		auto flush_au = [&]() {
+			if (!au_has)
+			{
+				return;
+			}
+			av_frame_t au;
+			memset(&au, 0, sizeof(au));
+			au.ct = codec_type_h264;
+			au.mt = media_type_video;
+			au.pts = au_pts;
+			au.dts = au_pts;
+			au.data = (uint8_t*)au_data.data();
+			au.data_size = (uint32_t)au_data.size();
+			invoke_rtp_frame(au);
+			stats_.frames_received++;
+			au_data.clear();
+			au_has = false;
+		};
+		// 时间戳不同（MTAP 带 ts 偏移）就先把上一个访问单元刷出去，不会把两帧拼在一起
+		auto push_nal = [&](const av_frame_t& f) {
+			if (au_has && f.pts != au_pts)
+			{
+				flush_au();
+			}
+			if (!au_has)
+			{
+				au_pts = f.pts;
+				au_has = true;
+			}
+			au_data.append((const char*)f.data, f.data_size);
+		};
 		
 		for (auto pkt : pkts)
 		{
@@ -214,8 +252,7 @@ namespace rtpx
 
 				if (!waiting_for_keyframe_)
 				{
-					invoke_rtp_frame(frame);
-					stats_.frames_received++;
+					push_nal(frame);
 				}
 				else
 				{
@@ -263,8 +300,7 @@ namespace rtpx
 					{
 						frame.data = (uint8_t*)frame_data.data();
 						frame.data_size = (uint32_t)frame_data.size();
-						invoke_rtp_frame(frame);
-						stats_.frames_received++;
+						push_nal(frame);
 					}
 					else
 					{
@@ -321,8 +357,7 @@ namespace rtpx
 					{
 						frame.data = (uint8_t*)frame_data.data();
 						frame.data_size = (uint32_t)frame_data.size();
-						invoke_rtp_frame(frame);
-						stats_.frames_received++;
+						push_nal(frame);
 					}
 					else
 					{
@@ -382,8 +417,7 @@ namespace rtpx
 
 					if (!waiting_for_keyframe_)
 					{
-						invoke_rtp_frame(frame);
-						stats_.frames_received++;
+						push_nal(frame);
 					}
 					else
 					{
@@ -432,8 +466,7 @@ namespace rtpx
 					
 					if (!waiting_for_keyframe_)
 					{
-						invoke_rtp_frame(frame);
-						stats_.frames_received++;
+						push_nal(frame);
 					}
 					else
 					{
@@ -521,8 +554,7 @@ namespace rtpx
 
 						if (!waiting_for_keyframe_)
 						{
-							invoke_rtp_frame(frame);
-							stats_.frames_received++;
+							push_nal(frame);
 						}
 						else
 						{
@@ -542,11 +574,12 @@ namespace rtpx
 			}
 			else
 			{
+				flush_au();
 				return false;
 			}
 		}
 
-
+		flush_au();
 		return true;
 	}
 

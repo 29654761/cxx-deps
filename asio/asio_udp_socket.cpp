@@ -1,5 +1,7 @@
 #include "asio_udp_socket.h"
 
+#include <thread>  // std::this_thread::sleep_for；MSVC 会间接带进来，gcc 不会
+
 namespace asio
 {
 
