@@ -289,6 +289,13 @@ namespace voip
 			if (!active_.compare_exchange_strong(experted, false))
 				return;
 
+			if (log_)
+			{
+				log_->info("SIP call stop: id={} dir={} got_ack={} invite_pending={} got_bye={}",
+					call_id_, direction_ == direction_t::outgoing ? "outgoing" : "incoming",
+					got_ack, invite_pending_, got_bye)->flush();
+			}
+
 			cancel_dtmf();
 			rtp_->stop();
 			stop_bfcp();
@@ -296,6 +303,10 @@ namespace voip
 			timer_.cancel(ec);
 
 			sip_connection_ptr con = get_con();
+			if (!con && log_)
+			{
+				log_->warn("SIP call {} stop: connection lost, cannot send hangup signaling", call_id_)->flush();
+			}
 			if (con)
 			{
 				if (got_ack)
@@ -456,7 +467,11 @@ namespace voip
 			rsp.set_call_id(call_id_);
 			rsp.set_status("603");
 			rsp.set_msg("Decline");
-			con->send_message(rsp);
+			bool ok = con->send_message(rsp);
+			if (log_)
+			{
+				log_->info("SIP call {} refuse (603): {}", call_id_, ok ? "ok" : "failed")->flush();
+			}
 			got_invite_final_rsp = true;
 			return true;
 		}
@@ -787,6 +802,10 @@ namespace voip
 		// 并通知上层呼叫被取消（此前完全没有处理 CANCEL，主叫取消后网关侧设备僵死到超时收割）
 		void sip_call::on_cancel(const sip_message& msg)
 		{
+			if (log_)
+			{
+				log_->info("SIP call {} received CANCEL (got_ack={} answered={})", call_id_, got_ack, answered_)->flush();
+			}
 			auto con = get_con();
 			if (!con)
 				return;
@@ -1170,7 +1189,13 @@ namespace voip
 			sip_message req = ep_->create_request("CANCEL", url_, cseq, from, to, nullptr, vias, false);
 			req.set_call_id(call_id_);
 
-			return con->send_message(req);
+			bool ok = con->send_message(req);
+			if (log_)
+			{
+				log_->info("SIP call {} send CANCEL (cseq={} branch={}): {}", call_id_, cseq, invite_branch_,
+					ok ? "ok" : "failed")->flush();
+			}
+			return ok;
 		}
 
 		bool sip_call::trying(const sip_message& invite)

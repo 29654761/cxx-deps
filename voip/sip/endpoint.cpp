@@ -857,6 +857,10 @@ namespace voip
 			}
 			else
 			{
+				if (log_)
+				{
+					log_->warn("Received SIP CANCEL for unknown call: call_id={}", call_id)->flush();
+				}
 				auto rsp = create_response(message, nullptr, false);
 				rsp.set_status("481");
 				rsp.set_msg("Call/Transaction Does Not Exist");
