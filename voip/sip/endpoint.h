@@ -130,6 +130,7 @@ namespace voip
 			void on_ack(sip_connection_ptr con, const sip_message& message);
 			void on_info(sip_connection_ptr con, const sip_message& message);
 			void on_bye(sip_connection_ptr con, const sip_message& message);
+			void on_cancel(sip_connection_ptr con, const sip_message& message);
 			void on_options(sip_connection_ptr con, const sip_message& message);
 			void on_update(sip_connection_ptr con, const sip_message& message);
 			void on_response(sip_connection_ptr con, const sip_message& message);

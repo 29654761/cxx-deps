@@ -601,6 +601,10 @@ namespace voip
 			{
 				on_bye(con, message);
 			}
+			else if (message.match_method("CANCEL"))
+			{
+				on_cancel(con, message);
+			}
 			else if (message.match_method("OPTIONS"))
 			{
 				on_options(con, message);
@@ -838,6 +842,25 @@ namespace voip
 			if (call)
 			{
 				call->on_bye(message);
+			}
+		}
+
+		void endpoint::on_cancel(sip_connection_ptr con, const sip_message& message)
+		{
+			// 主叫方撤销未接通的 INVITE：路由到对应呼叫处理（回 CANCEL 200 + INVITE 487 并清理设备）；
+			// 找不到呼叫说明事务已不存在，按 RFC 3261 回 481
+			std::string call_id = message.call_id();
+			auto call = get_call(call_id);
+			if (call)
+			{
+				call->on_cancel(message);
+			}
+			else
+			{
+				auto rsp = create_response(message, nullptr, false);
+				rsp.set_status("481");
+				rsp.set_msg("Call/Transaction Does Not Exist");
+				con->send_message(rsp);
 			}
 		}
 

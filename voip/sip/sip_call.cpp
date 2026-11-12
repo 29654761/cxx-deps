@@ -300,6 +300,7 @@ namespace voip
 			{
 				if (got_ack)
 				{
+					// 对话已确认（发出/收到 ACK）：只能用 BYE 结束，重试至多 3 次等对端回 200/发 BYE
 					for (int i = 0; i < 3; i++)
 					{
 						if (got_bye)
@@ -307,6 +308,24 @@ namespace voip
 						bye();
 						std::this_thread::sleep_for(std::chrono::seconds(1));
 					}
+				}
+				else if (direction_ == direction_t::outgoing && invite_pending_)
+				{
+					// 主叫且 INVITE 尚未接通：必须发 CANCEL 撤销未决 INVITE（RFC 3261 §9）。
+					// 此前这里什么都不发，对端终端会一直振铃到自身超时；重试至多 3 次等终极响应
+					for (int i = 0; i < 3; i++)
+					{
+						if (got_invite_final_rsp)
+							break;
+						cancel();
+						std::this_thread::sleep_for(std::chrono::seconds(1));
+					}
+				}
+				else if (direction_ == direction_t::incoming && !got_invite_final_rsp)
+				{
+					// 被叫且尚未应答：给未决 INVITE 回 603 拒绝，终止事务（此前也是什么都不发，
+					// 主叫方要等到超时才知道呼叫无人应答）
+					refuse();
 				}
 			}
 			clear_con();
@@ -412,19 +431,33 @@ namespace voip
 				return false;
 			}
 
+			// 已对 INVITE 发出 200 OK：其后收到的 ACK 是接通确认（区别于 487/603 的 ACK）
+			answered_ = true;
+
 			rtp_->start();
 			return true;
 		}
 
 		bool sip_call::refuse()
 		{
-			auto rsp = ep_->create_response(invite_, nullptr, true);
-			rsp.set_status("603");
-			rsp.set_msg("Decline");
 			auto con = get_con();
 			if (!con)
 				return false;
+			if (got_invite_final_rsp)
+				return true;	// 已回过终极响应（如 487），不能再对同一 INVITE 重复回
+
+			auto rsp = ep_->create_response(invite_, nullptr, true);
+			// To 带上我方 tag（180 里已带），与 ringing()/invite_rsp() 保持一致
+			sip_address to = invite_.to();
+			if (!my_tag_.empty()) {
+				to.set("tag", my_tag_);
+			}
+			rsp.set_to(to);
+			rsp.set_call_id(call_id_);
+			rsp.set_status("603");
+			rsp.set_msg("Decline");
 			con->send_message(rsp);
+			got_invite_final_rsp = true;
 			return true;
 		}
 
@@ -638,8 +671,13 @@ namespace voip
 			if (!got_ack)
 			{
 				got_ack = true;
-				auto self = shared_from_this();
-				invoke_connected();
+				// 只有应答（200 OK）后的 ACK 才是接通；487/603 的 ACK 仅是对端确认事务终止，
+				// 不能触发 connected（否则呼叫被取消/拒绝后上层仍会按接通处理）
+				if (answered_)
+				{
+					auto self = shared_from_this();
+					invoke_connected();
+				}
 			}
 		}
 
@@ -745,9 +783,57 @@ namespace voip
 			}
 		}
 
+		// 对端（主叫方）撤销其呼入 INVITE（RFC 3261 §9.2）：回 CANCEL 200 + 原 INVITE 487，
+		// 并通知上层呼叫被取消（此前完全没有处理 CANCEL，主叫取消后网关侧设备僵死到超时收割）
+		void sip_call::on_cancel(const sip_message& msg)
+		{
+			auto con = get_con();
+			if (!con)
+				return;
+
+			// CANCEL 只作用于未接通的 INVITE；对话已确认后收到 CANCEL 与事务不符，回 481
+			if (got_ack)
+			{
+				auto rsp = ep_->create_response(msg, nullptr, false);
+				rsp.set_status("481");
+				rsp.set_msg("Call/Transaction Does Not Exist");
+				con->send_message(rsp);
+				return;
+			}
+
+			auto rsp = ep_->create_response(msg, nullptr, false);
+			rsp.set_status("200");
+			rsp.set_msg("OK");
+			con->send_message(rsp);
+
+			// 原发 INVITE 必须回 487 终止事务（此后不能再对 INVITE 发其他终极响应）
+			if (!got_invite_final_rsp)
+			{
+				got_invite_final_rsp = true;
+				auto rsp487 = ep_->create_response(invite_, nullptr, true);
+				rsp487.set_status("487");
+				rsp487.set_msg("Request Terminated");
+				sip_address to = invite_.to();
+				if (!my_tag_.empty()) {
+					to.set("tag", my_tag_);
+				}
+				rsp487.set_to(to);
+				con->send_message(rsp487);
+			}
+
+			// 未应答时呼叫已被对端取消，通知上层清理（已应答的通话不受 CANCEL 影响，等 BYE）
+			if (!answered_)
+			{
+				invoke_hangup(call::reason_code_t::hangup);
+			}
+		}
+
 		void sip_call::on_decline(const sip_message& msg)
 		{
 			got_bye = true;
+			// INVITE 事务已因 603 终结：对话从未确认（got_ack 不置位），停止任何未决事务的收尾动作
+			invite_pending_ = false;
+			got_invite_final_rsp = true;
 			auto con = get_con();
 			if (con)
 			{
@@ -808,10 +894,18 @@ namespace voip
 					std::string smsg = msg.msg();
 					log_->error("Device response failed: status={},message={}", status, smsg)->flush();
 				}
-				
+
 				uint32_t seq = 0;
 				std::string method;
 				msg.get_cseq(seq, method);
+				// INVITE 收到 4xx-6xx 终极响应：事务终结，必须回 ACK（RFC 3261 §17.1.1.2），
+				// 否则对端按 T1 重传响应直至 Timer H（32s）。603 已由 endpoint 分发到 on_decline，不经过这里
+				if (strcasecmp(method.c_str(), "INVITE") == 0)
+				{
+					invite_pending_ = false;
+					got_invite_final_rsp = true;
+					ack(msg);
+				}
 				// OPTIONS 心跳与 INFO 按键被拒（如 415/501 不支持）不影响通话，不挂断
 				if (method != "OPTIONS" && method != "INFO")
 				{
@@ -859,12 +953,19 @@ namespace voip
 				msg.from().get("tag", my_tag_);
 				msg.to().get("tag", other_tag_);
 				ack(msg);
+				// 200 OK 已确认对话（此前该标记在 ack() 里无条件置位，603 等非 2xx 路径会误判）
+				got_ack = true;
 
 				rtp_->start();
 			}
 			else if (strcasecmp(method.c_str(), "BYE") == 0)
 			{
 				got_bye = true;
+			}
+			else if (strcasecmp(method.c_str(), "CANCEL") == 0)
+			{
+				// 我方 CANCEL 被对端接受，未决 INVITE 已撤销
+				got_invite_final_rsp = true;
 			}
 		}
 
@@ -902,6 +1003,12 @@ namespace voip
 			if (!other_tag_.empty()) {
 				to.url.set("tag", other_tag_);
 			}
+
+			// 记录 INVITE 事务参数：未接通挂断时 CANCEL 必须复用（branch/cseq/To 逐字节一致）
+			invite_branch_ = branch;
+			invite_cseq_ = cseq;
+			invite_to_ = to;
+			invite_pending_ = true;
 
 			sip_address contact;
 			make_contact(contact);
@@ -1031,6 +1138,41 @@ namespace voip
 			return con->send_message(req);
 		}
 
+		bool sip_call::cancel()
+		{
+			// 撤销本端未接通的 INVITE，只能用于主叫方向（被叫回 603/487）
+			if (invite_branch_.empty() || invite_cseq_ == 0)
+			{
+				return false;
+			}
+			auto con = get_con();
+			if (!con)
+				return false;
+
+			// RFC 3261 §9.1：Request-URI/Call-ID/From/To 与原 INVITE 一致，
+			// CSeq 数字部分一致（方法为 CANCEL），顶层 Via（branch）逐字节一致
+			uint32_t cseq = invite_cseq_;
+
+			sip_address from, to;
+			from.url.username = local_alias_;
+			from.url.host = nat_address_;
+			from.url.port = local_port_;
+			if (!my_tag_.empty()) {
+				from.set("tag", my_tag_);
+			}
+			to = invite_to_;
+
+			std::vector<sip_via> vias;
+			vias.emplace_back(con->is_tcp(), nat_address_, local_port_, "", 0, invite_branch_);
+
+			// Request-URI 用原 INVITE 的 url_（不能用 remote_target_uri()，它已被 180/183 的 Contact 刷新；
+			// CANCEL 必须与原 INVITE 一致），CANCEL 无 Contact、无正文
+			sip_message req = ep_->create_request("CANCEL", url_, cseq, from, to, nullptr, vias, false);
+			req.set_call_id(call_id_);
+
+			return con->send_message(req);
+		}
+
 		bool sip_call::trying(const sip_message& invite)
 		{
 			auto con = get_con();
@@ -1105,10 +1247,9 @@ namespace voip
 				req.headers.add("Route", *itr);
 			}
 
-			got_ack = true;
 			auto self = shared_from_this();
 
-			if (msg.status() == "200") 
+			if (msg.status() == "200")
 			{
 				invoke_connected();
 			}

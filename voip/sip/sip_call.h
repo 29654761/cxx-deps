@@ -40,6 +40,7 @@ namespace voip
 			void on_ack(const sip_message& msg);
 			void on_info(const sip_message& msg);
 			void on_bye(const sip_message& msg);
+			void on_cancel(const sip_message& msg);
 			void on_decline(const sip_message& msg);
 			void on_options(const sip_message& msg);
 			void on_response(const sip_message& msg);
@@ -77,6 +78,9 @@ namespace voip
 			bool invite();
 			bool invite_rsp(const sip_message& invite, const std::string& sdp);
 			bool bye();
+			// 发 CANCEL 撤销本端未接通的 INVITE（RFC 3261 §9）：与 INVITE 同 Request-URI/
+			// Call-ID/From/To/CSeq 序号，顶层 Via（branch）逐字节一致
+			bool cancel();
 			bool trying(const sip_message& invite);
 			bool ringing(const sip_message& invite);
 			bool ack(const sip_message& msg);
@@ -140,8 +144,17 @@ namespace voip
 
 			sip_message invite_;
 
+			// 我方发出 INVITE 时的关键参数：CANCEL 必须与之逐字节一致（RFC 3261 §9.1）
+			std::string invite_branch_;
+			uint32_t invite_cseq_ = 0;
+			sip_address invite_to_;
+
+			bool invite_pending_ = false;		// 我方 INVITE 事务未决（已发出、未收到终极响应）
+			bool answered_ = false;				// 被叫已对 INVITE 回 200 OK（区分接通 ACK 与 487/603 的 ACK）
 			bool got_ack = false;
 			bool got_bye = false;
+			// 未接通挂断时 INVITE 事务的终极响应已收/发（CANCEL 的 200 或 INVITE 的 487），用于停止重试、避免重复回终极响应
+			bool got_invite_final_rsp = false;
 
 			int heartbeat_ = 0;
 			int keyframe_ = 3;
