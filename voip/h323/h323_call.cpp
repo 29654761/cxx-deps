@@ -1099,6 +1099,7 @@ namespace voip
 			ui.Encode(stream);
 			stream.CompleteEncoding();
 			Q931 q931;
+			q931.BuildFacility(call_ref_, direction_ == direction_t::incoming);
 			q931.SetDisplayName(local_alias_);
 			q931.SetIE(Q931::InformationElementCodes::UserUserIE, stream);
 
@@ -2055,7 +2056,7 @@ namespace voip
 					auto codec = h323_util::convert_audio_codec_type_back(itr->codec_type);
 					H245_AudioCapability& acap = (H245_AudioCapability&)entry->m_capability;
 					acap.SetTag(codec);
-					(PASN_Integer&)acap = 240;
+					(PASN_Integer&)acap = 60;
 					entries.Append(entry);
 
 
@@ -3931,7 +3932,7 @@ namespace voip
 			heartbeat_++;
 			if (heartbeat_ >= 15) {
 				send_round_trip_delay_request();
-				send_facility(H225_FacilityReason::Choices::e_undefinedReason, false, true);
+				send_facility(H225_FacilityReason::Choices::e_undefinedReason, direction_ == direction_t::incoming, true);
 
 				if (h239_token_owned_)
 				{
