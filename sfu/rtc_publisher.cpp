@@ -162,3 +162,15 @@ bool rtc_publisher::write_sample(uint8_t* data, int length, uint32_t samples)
 		return false;
 	return true;
 }
+
+bool rtc_publisher::write_sample_ts(uint8_t* data, int length, int64_t capture_time_us)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if(!handle_)
+		return false;
+
+	int r = rtc_write_sample_ts(handle_, data, length, capture_time_us);
+	if (r != RTC_OK)
+		return false;
+	return true;
+}

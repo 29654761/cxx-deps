@@ -45,6 +45,10 @@ public:
 	bool publish_mcu(void* channel_handler, const rtc_publish_options_t& options, int kind);
 	void unpublish();
 	bool write_sample(uint8_t* data, int length, uint32_t samples);
+	// 按内容时刻写一帧（rtc_write_sample_ts，librtc 新接口）：capture_time_us 为该帧的内容时刻
+	// （采集/合成时刻，std::chrono::steady_clock 微秒），RTP 时间戳与 RTCP SR 由 rtc-go 按它生成，
+	// 订阅端按 SR 还原出内容时刻，编码/发送抖动不影响音画同步。与 write_sample 二选一，同一发布器不能混用
+	bool write_sample_ts(uint8_t* data, int length, int64_t capture_time_us);
 private:
 	// 在 rtc-go 发布前对本轨道注册关键帧回调（调用方须已持有 mutex_）
 	void register_keyframe_callback();
