@@ -73,6 +73,10 @@ public:
 	sys::mutex_callback<rtc_user_event_callback> user_event;
 	sys::mutex_callback<rtc_track_event_callback> track_event;
 	sys::mutex_callback<rtc_track_sample_callback> track_sample_event;
+	// 已失效，本事件从不触发：rtc-go 的关键帧请求回调按本地轨道（track handle）注册，频道级无从注册
+	// （原先把频道 handle 传给 rtc_set_keyframe_request_callback，rtc-go 查不到轨道，静默失效）。
+	// 需要关键帧请求请用 rtc_publisher::set_keyframe_request_callback。
+	// 仅为兼容 rtc-devgate master 仍在 add 本成员而保留；devgate 分支 feat/keyframe-per-track 合入后即可删除
 	sys::mutex_callback<rtc_keyframe_request_callback> keyframe_request_event;
 	sys::mutex_callback<rtc_custom_msg_callback> custom_msg_event;
 	sys::mutex_callback<rtc_active_speakers_callback> active_speakers_event;
@@ -119,8 +123,6 @@ private:
 		);
 
 	static void s_rtc_layer_switched_callback(void* context, const rtc_layer_switched_t* data);
-
-	static void s_rtc_keyframe_request_callback(void* context, const char* track_id);
 
 	static void s_rtc_custom_msg_callback(void* context, const rtc_custom_msg_t* msg);
 

@@ -32,7 +32,6 @@ bool rtc_client::open()
 	rtc_set_connection_quality_callback(handle_, s_rtc_connection_quality_callback, this);
 	rtc_set_active_speakers_callback(handle_, s_rtc_active_speakers_callback, this);
 	rtc_set_custom_msg_callback(handle_, s_rtc_custom_msg_callback, this);
-	rtc_set_keyframe_request_callback(handle_, s_rtc_keyframe_request_callback, this);
 
 	timer_.expires_after(std::chrono::seconds(1));
 	timer_.async_wait(std::bind(&rtc_client::handle_timer, shared_from_this(), std::placeholders::_1));
@@ -557,12 +556,6 @@ void rtc_client::s_rtc_layer_switched_callback(void* context, const rtc_layer_sw
 {
 	rtc_client* p = (rtc_client*)context;
 	p->layer_switched_event.invoke(data);
-}
-
-void rtc_client::s_rtc_keyframe_request_callback(void* context, const char* track_id)
-{
-	rtc_client* p = (rtc_client*)context;
-	p->keyframe_request_event.invoke(track_id);
 }
 
 void rtc_client::s_rtc_custom_msg_callback(void* context, const rtc_custom_msg_t* msg)

@@ -28,7 +28,15 @@ namespace ffmpeg
 				return false;
 			}
 
-			const AVCodec* codec = avcodec_find_encoder(options_.codec_id);
+			const AVCodec* codec = nullptr;
+			if (!options_.codec_name.empty())
+			{
+				codec = avcodec_find_encoder_by_name(options_.codec_name.c_str());
+			}
+			if (!codec)
+			{
+				codec = avcodec_find_encoder(options_.codec_id);
+			}
 			if (!codec)
 			{
 				close();
@@ -45,7 +53,7 @@ namespace ffmpeg
 			context_->sample_fmt = options_.format;
 			context_->sample_rate = options_.samplerate;
 			context_->thread_count = options_.thread_count;
-			context_->bit_rate = 64000; //64Kb
+			context_->bit_rate = options_.bitrate > 0 ? options_.bitrate : 64000;
 			av_channel_layout_default(&context_->ch_layout, options_.channels);
 
 			AVDictionary* opts = nullptr;
