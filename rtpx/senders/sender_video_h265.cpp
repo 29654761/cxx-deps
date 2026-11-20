@@ -12,8 +12,9 @@
 
 namespace rtpx
 {
-    sender_video_h265::sender_video_h265(uint8_t pt, uint32_t ssrc, media_type_t mt, const sdp_format& fmt,spdlogger_ptr log)
+    sender_video_h265::sender_video_h265(uint8_t pt, uint32_t ssrc, media_type_t mt, const sdp_format& fmt,spdlogger_ptr log, bool aggregate)
 		:sender(pt,ssrc,mt,fmt,log)
+		,aggregate_(aggregate)
 	{
 	}
 
@@ -43,7 +44,21 @@ namespace rtpx
             total_nal_size += itr->size();
         }
 
-        if (total_nal_size <= MAX_RTP_PAYLOAD_SIZE&&nals.size()>1)
+        // 这一次送进来的全是参数集（VPS/SPS/PPS，没有图像数据）时不算帧结尾：
+        // 不打 Mark、时间戳不前进，与随后的 IDR 同属一帧
+        bool end_of_frame = false;
+        for (auto itr = nals.begin(); itr != nals.end(); itr++)
+        {
+            h265::nal_header_t hdr;
+            h265::nal_header_set(&hdr, (const uint8_t*)itr->data(), itr->size());
+            if (hdr.type != (uint8_t)h265::nal_type_t::vps && hdr.type != (uint8_t)h265::nal_type_t::sps && hdr.type != (uint8_t)h265::nal_type_t::pps)
+            {
+                end_of_frame = true;
+                break;
+            }
+        }
+
+        if (aggregate_ && total_nal_size <= MAX_RTP_PAYLOAD_SIZE&&nals.size()>1)
         {
             std::string nal = nals[0];
             h265::nal_header_t nal_header;
@@ -68,22 +83,20 @@ namespace rtpx
                 payload.append(*itr);
             }
 
-            if (nal_header.type == (uint8_t)h265::nal_type_t::pps || nal_header.type == (uint8_t)h265::nal_type_t::sps)
-            {
-                pkt->mutable_header()->m = 0;
-            }
-            else
-            {
-                pkt->mutable_header()->m = 1;
-            }
+            pkt->mutable_header()->m = end_of_frame ? 1 : 0;
             pkt->set_payload((const uint8_t*)payload.data(), payload.size());
             this->send_packet(pkt);
+            // 聚合包即整帧：帧结尾时时间戳要前进，否则下一帧会沿用本帧时间戳
+            if (end_of_frame)
+            {
+                timestamp_ += duration;
+            }
         }
         else
         {
             for (auto itr = nals.begin(); itr != nals.end(); itr++)
             {
-                islast = itr == (nals.end() - 1);
+                islast = end_of_frame && itr == (nals.end() - 1);
                 send_nal(duration, (const uint8_t*)itr->data(), (uint32_t)itr->size(),islast);
             }
         }
@@ -105,7 +118,7 @@ namespace rtpx
             h265::nal_header_t nal_header;
             h265::nal_header_set(&nal_header, nal,nal_size);
             uint32_t pos = 2; //skip nal header
-            nal_size--;
+            nal_size -= 2; // H.265 NAL 头是 2 字节，分片只携带头之后的数据
 
             h265::nal_header_t fu_ind;
             fu_ind.f = nal_header.f;

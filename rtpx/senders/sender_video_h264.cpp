@@ -12,8 +12,9 @@
 
 namespace rtpx
 {
-	sender_video_h264::sender_video_h264(uint8_t pt, uint32_t ssrc, media_type_t mt, const sdp_format& fmt, spdlogger_ptr log)
+	sender_video_h264::sender_video_h264(uint8_t pt, uint32_t ssrc, media_type_t mt, const sdp_format& fmt, spdlogger_ptr log, bool aggregate)
 		:sender(pt,ssrc,mt,fmt, log)
+		,aggregate_(aggregate)
 	{
 	}
 
@@ -56,7 +57,7 @@ namespace rtpx
             std::vector<std::string> hdr;
             hdr.push_back(sps_);
             hdr.push_back(pps_);
-            send_nals(hdr, duration);
+            send_nals(hdr, duration, false);
             sps_.clear();
             pps_.clear();
         }
@@ -65,7 +66,7 @@ namespace rtpx
         return true;
 	}
     
-    void sender_video_h264::send_nals(const std::vector<std::string>& nals, uint32_t duration)
+    void sender_video_h264::send_nals(const std::vector<std::string>& nals, uint32_t duration, bool end_of_frame)
     {
         if (nals.size() == 0)
             return;
@@ -76,7 +77,7 @@ namespace rtpx
             total_nal_size += itr->size();
         }
 
-        if (total_nal_size <= MAX_RTP_PAYLOAD_SIZE && nals.size() > 1)
+        if (aggregate_ && total_nal_size <= MAX_RTP_PAYLOAD_SIZE && nals.size() > 1)
         {
             std::string nal = nals[0];
             uint8_t nal0 = nal[0];
@@ -100,22 +101,20 @@ namespace rtpx
                 payload.append(*itr);
             }
 
-            if (nal_header.t == 7 || nal_header.t == 8)
-            {
-                pkt->mutable_header()->m = 0;
-            }
-            else
-            {
-                pkt->mutable_header()->m = 1;
-            }
+            pkt->mutable_header()->m = end_of_frame ? 1 : 0;
             pkt->set_payload((const uint8_t*)payload.data(), payload.size());
             this->send_packet(pkt);
+            // 聚合包即整帧：帧结尾时时间戳要前进，否则下一帧会沿用本帧时间戳
+            if (end_of_frame)
+            {
+                timestamp_ += duration;
+            }
         }
         else
         {
             for (auto itr = nals.begin(); itr != nals.end(); itr++)
             {
-                bool islast = itr == (nals.end() - 1);
+                bool islast = end_of_frame && itr == (nals.end() - 1);
                 send_nal(duration, (const uint8_t*)itr->data(), (uint32_t)itr->size(), islast);
             }
         }

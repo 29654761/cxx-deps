@@ -135,6 +135,11 @@ namespace rtpx {
 		void set_rtcp_mux(bool v) { is_rtcp_mux_ = v; }
 		bool is_rtcp_mux()const { return is_rtcp_mux_; }
 
+		// H.264/H.265 发送时是否把多个小 NAL 聚合成一个包（STAP-A / AP），默认开。
+		// 须在协商创建发送器之前设置，之后修改不影响已创建的发送器
+		void set_nal_aggregation(bool v) { nal_aggregation_ = v; }
+		bool nal_aggregation()const { return nal_aggregation_; }
+
 		uint16_t sctp_stream_id()const { return sctp_stream_id_; }
 		void set_sctp_stream_id(uint16_t sid) { if (!has_sctp_stream_id_) { sctp_stream_id_ = sid; has_sctp_stream_id_ = true; } }
 
@@ -226,6 +231,7 @@ namespace rtpx {
 		mutable std::shared_mutex local_mutex_;
 		media_type_t media_type_ = media_type_unknown;
 		bool is_rtcp_mux_ = false;
+		bool nal_aggregation_ = true; // H.264/H.265 是否允许聚合包，见 set_nal_aggregation
 
 		std::string cname_;
 		std::string mid_;
