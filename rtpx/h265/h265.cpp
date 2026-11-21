@@ -32,9 +32,10 @@ size_t h265::nal_header_set(nal_header_t* nal, const uint8_t* v, size_t s)
 {
     if (s < 2)
         return 0;
+    // H.265 NAL 头 2 字节：F(1) | Type(6) | LayerId(6) | TID(3)，LayerId 跨两个字节（v[0] 末位是最高位）
     nal->f= (v[0] & 0x80) >> 7;
     nal->type = (v[0] & 0x7e) >> 1;
-    nal->layer = (v[0] & 0x01) | (v[1] & 0xf8);
+    nal->layer = ((v[0] & 0x01) << 5) | ((v[1] & 0xf8) >> 3);
     nal->tid = v[1] & 0x07;
     return 2;
 }
@@ -43,10 +44,10 @@ size_t h265::nal_header_get(const nal_header_t* nal, uint8_t* v, size_t s)
 {
     if (s < 2)
         return 0;
-    
+
     uint8_t b0 = 0, b1 = 0;
     b0 |= nal->f << 7;
-    b0 |= nal->tid << 1;
+    b0 |= nal->type << 1;
     b0 |= (nal->layer & 0x20) >> 5;
     b1 |= (nal->layer & 0x1f) << 3;
     b1 |= nal->tid;

@@ -86,6 +86,8 @@ namespace voip
 		log_ = log;
 
 		rtp_ = std::make_shared<rtpx::rtp_session>(ioc, log, true, false);
+		// SIP/H.323 终端不发 STAP-A/AP 聚合包：部分终端（如华夏庭审主机）解不了，单 NAL 包所有终端都支持
+		rtp_->set_nal_aggregation(false);
 		if (rtp_ports_)
 		{
 			rtp_->set_port_range(rtp_ports_->min_port(), rtp_ports_->max_port());

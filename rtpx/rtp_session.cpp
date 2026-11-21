@@ -507,6 +507,7 @@ namespace rtpx {
 		}
 		ms->set_local_ice_options(ice_ufrag_, ice_pwd_, ice_options_);
 		ms->set_cname(cname_);
+		ms->set_nal_aggregation(nal_aggregation_);
 		auto self = shared_from_this();
 		ms->on_frame = std::bind(&rtp_session::handle_ms_frame, self, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5);
 		ms->on_receive_require_keyframe = std::bind(&rtp_session::handle_ms_request_keyframe, self, std::placeholders::_1);

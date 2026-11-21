@@ -80,6 +80,11 @@ namespace rtpx {
 
 		void require_keyframe();
 		bool require_keyframe(const std::string& mid);
+
+		// H.264/H.265 发送是否允许把多个小 NAL 聚合成一个包（STAP-A / AP），默认开（WebRTC 链路依赖）。
+		// 对接 SIP/H.323 等传统终端时关闭：部分终端不支持聚合包，单 NAL 包是 RFC 规定接收端必须支持的。
+		// 对之后创建的媒体流生效，须在 create_media_stream / set_remote_sdp 之前设置
+		void set_nal_aggregation(bool v) { nal_aggregation_ = v; }
 	protected:
 		media_stream_ptr create_media_stream(media_type_t mt, const std::string& mid,bool security, transport_ptr rtp,transport_ptr rtcp,
 			const std::string& ms_stream_id = "", const std::string& ms_track_id = "", rtp_trans_mode_t trans_mode=rtp_trans_mode_sendrecv);
@@ -157,6 +162,7 @@ namespace rtpx {
 
 		bool is_port_mux_ = true;
 		uint16_t mux_port_ = 0;
+		bool nal_aggregation_ = true; // 新建媒体流的 H.264/H.265 聚合开关，见 set_nal_aggregation
 
 		mutable std::shared_mutex media_streams_mutex_;
 		std::vector<media_stream_ptr> media_streams_;

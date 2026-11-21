@@ -1525,11 +1525,11 @@ namespace rtpx {
 		sender_ptr sender;
 		if (fmt.codec == codec_type_h264)
 		{
-			sender = std::make_shared<sender_video_h264>(fmt.pt, ssrc, media_type(), fmt,log_);
+			sender = std::make_shared<sender_video_h264>(fmt.pt, ssrc, media_type(), fmt,log_, nal_aggregation_);
 		}
 		else if (fmt.codec == codec_type_h265)
 		{
-			sender = std::make_shared<sender_video_h265>(fmt.pt, ssrc, media_type(), fmt, log_);
+			sender = std::make_shared<sender_video_h265>(fmt.pt, ssrc, media_type(), fmt, log_, nal_aggregation_);
 		}
 		else if (fmt.codec == codec_type_vp8)
 		{
