@@ -8,6 +8,7 @@ extern "C"
 }
 #include <sys2/callback.hpp>
 #include <memory>
+#include <atomic>
 
 namespace ffmpeg
 {
@@ -92,7 +93,8 @@ namespace ffmpeg
 		protected:
 			AVCodecContext* context_ = nullptr;
 			video_encoder_options options_;
-			bool keyframe_ = false;
+			// 下一帧强制编关键帧；required_keyframe 可能在 RTC 回调线程调用，与编码线程并发，故用原子量
+			std::atomic<bool> keyframe_{ false };
 		};
 
 		typedef std::shared_ptr<video_encoder> video_encoder_ptr;

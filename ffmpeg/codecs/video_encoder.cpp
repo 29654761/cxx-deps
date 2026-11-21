@@ -47,10 +47,9 @@ namespace ffmpeg
 
 		bool video_encoder::send_frame(const AVFrame* frame)
 		{
-            if (keyframe_)
+            if (keyframe_.exchange(false))
             {
                 ((AVFrame*)frame)->pict_type = AVPictureType::AV_PICTURE_TYPE_I;
-                keyframe_ = false;
             }
             else
             {

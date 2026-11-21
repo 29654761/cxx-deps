@@ -24,6 +24,10 @@ namespace ffmpeg
 			AVSampleFormat format = AVSampleFormat::AV_SAMPLE_FMT_NONE;
 			int thread_count = 1;
 			int frame_size = 0;
+			// 码率（bps），默认 64kbps 与原先写死的值一致
+			int bitrate = 64000;
+			// 编码器名，非空时优先按名字查找（如 "libopus"），找不到再按 codec_id 查
+			std::string codec_name;
 
 			bool opus_inband_fec = false;
 			int  opus_fec_packet_loss = 0;  //0~100%   Packet loss
