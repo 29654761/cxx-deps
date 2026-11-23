@@ -63,6 +63,18 @@ namespace voip
 		typedef std::function<void(voip::call_ptr call, const std::string& local_alias, const std::string& remote_alias,const std::string& called_alias,
 			const std::string& remote_addr, int remote_port,bool reg)> on_incoming_call_t;
 		typedef std::function<void(call_ptr, bool, bool)> on_presentation_role_changed_t;
+		// 对端申请辅流令牌（H.239 presentationTokenRequest / SIP BFCP FloorRequest）且我方未持有令牌时回调，
+		// 由上层决定同意还是拒绝（例如先问业务平台能不能共享）。request_id 是本次申请的标识（从 1 递增），
+		// 上层决定后调 respond_presentation_request(request_id, accept) 应答，可在任意线程调用，只需一次。
+		// - 未注册本回调：保持旧行为，我方未持有令牌就立即同意；
+		// - 我方持有令牌：库照旧直接拒绝，不回调；
+		// - 对端在应答前重发同一申请：沿用同一个 request_id，不重复回调；
+		// - 对端撤回申请或通话结束：挂起的申请作废，之后再应答会被忽略。
+		// 库内不做超时，上层须保证一定会应答（终端会一直等）。
+		// 回调在信令线程上执行，不要在回调里阻塞（如同步发 HTTP），应投递到其它线程处理。
+		// 注意：SIP 对端自己当 BFCP 主席时，对端本地抓令牌不经过我们申请，不会走这里，
+		// 只会收到 on_presentation_role_changed(owned=false, active=true)，此时无法拒绝。
+		typedef std::function<void(call_ptr, uint64_t request_id)> on_presentation_request_t;
 		// 收到对端电话按键（DTMF）。digit 取值 '0'-'9'、'*'、'#'、'A'-'D'；duration_ms 为按键时长(毫秒)，来源不提供时为 0。
 		// SIP 的 RFC 4733 RTP 事件、SIP INFO，以及 H.323 的 UserInputIndication 都汇总到这里。
 		// 注意：回调在 RTP 接收线程或信令线程上执行，不要在回调里做耗时操作。
@@ -87,6 +99,17 @@ namespace voip
 		virtual bool request_presentation_role() = 0;
 		virtual void release_presentation_role() = 0;
 		virtual bool has_presentation_role() = 0;
+		// 应答一次挂起的辅流令牌申请（见 on_presentation_request_t）。可在任意线程调用：
+		// 实际应答投递到本通话的 io 线程执行。accept=true 发同意（H.239 Ack / BFCP Granted），
+		// 随后回调 on_presentation_role_changed(false, true)；accept=false 发拒绝（H.239 Reject / BFCP Denied）。
+		// request_id 已作废（对端撤回、被新申请取代、通话已结束）时忽略。request_id 为 0 返回 false，否则返回 true（已投递）
+		bool respond_presentation_request(uint64_t request_id, bool accept);
+		// 收回对端持有的辅流令牌（让终端停止共享）。我方持有令牌时不适用，返回 false。
+		// H.323：H.245 RequestChannelClose 请求对端关闭辅流通道，对端随后发 presentationTokenRelease；
+		// SIP：我方是 BFCP 主席（对端经 FloorRequest 向我们申请）时发 FloorRequestStatus(Revoked)；
+		//      对端自己当主席（FloorStatus 推送）时我方无权收回，返回 false。
+		// 若对端申请仍挂起未应答，直接回拒绝。对端令牌释放后照常回调 on_presentation_role_changed(false, false)
+		virtual bool revoke_presentation_role() { return false; }
 		virtual bool remote_addr(std::string& ip, int& port) = 0;
 
 		void set_on_remote_ringing(on_ringing_t handler) { on_remote_ringing = handler; }
@@ -97,6 +120,7 @@ namespace voip
 		void set_on_frame(on_frame_t handler) { on_frame = handler; }
 		void set_on_hangup(on_hangup_t handler) { on_hangup = handler; }
 		void set_on_presentation_role_changed(on_presentation_role_changed_t handler) { on_presentation_role_changed = handler; }
+		void set_on_presentation_request(on_presentation_request_t handler) { on_presentation_request = handler; }
 		void set_on_dtmf(on_dtmf_t handler) { on_dtmf = handler; }
 
 		bool send_video_frame(const uint8_t* frame, uint32_t size, uint32_t duration,bool is_extend);
@@ -145,6 +169,12 @@ namespace voip
 		virtual bool send_dtmf_signaling(char digit, int duration_ms) { return false; }
 		// 停止发按键：清空待发队列并取消定时器（通话结束时由子类 stop() 调用）
 		void cancel_dtmf();
+
+		// 辅流令牌申请的应答，在 io 线程上执行（respond_presentation_request 投递过来）。
+		// 子类按 request_id 找到挂起的申请并发协议应答；不认识的 request_id 忽略。默认不支持
+		virtual void handle_presentation_response(uint64_t request_id, bool accept) {}
+		// 生成新的辅流令牌申请标识（从 1 递增，0 表示无）
+		uint64_t next_presentation_request_id() { return ++presentation_request_seq_; }
 	private:
 		// rtpx 回调桥接，转发到公开的 on_frame / on_received_require_keyframe / on_dtmf
 		void on_rtpx_frame(const std::string& mid, const std::string& sid, const std::string& tid, const rtpx::sdp_format& fmt, const av_frame_t& frame);
@@ -177,7 +207,11 @@ namespace voip
 		on_connected_t on_connected;
 		on_incoming_call_t on_incoming_call;
 		on_presentation_role_changed_t on_presentation_role_changed;
+		on_presentation_request_t on_presentation_request;
 		on_dtmf_t on_dtmf;
+
+		// 保护子类里挂起的辅流令牌申请（信令线程写入、io 线程应答、stop 清理）。只护这份数据，不要持锁回调上层
+		std::mutex presentation_mutex_;
 
 		int auto_keyframe_interval_ = 5;
 		mutable std::recursive_mutex mutex_;
@@ -203,6 +237,9 @@ namespace voip
 		bool use_rtp_address_ = false;
 
 	private:
+		asio::io_context& ioc_;								// 通话所在的 io_context，应答辅流令牌申请时投递到这里
+		std::atomic<uint64_t> presentation_request_seq_{ 0 };	// 辅流令牌申请标识的递增计数
+
 		// ---------- 发按键（send_dtmf）----------
 		// 待发的一个按键；digit 为 ',' 时表示停顿
 		struct dtmf_tone_t

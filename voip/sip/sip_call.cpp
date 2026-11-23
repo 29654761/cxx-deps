@@ -518,6 +518,109 @@ namespace voip
 			return bfcp_owned_;
 		}
 
+		bool sip_call::revoke_presentation_role()
+		{
+			if (!bfcp_ || !bfcp_negotiated_ || bfcp_owned_)
+			{
+				return false;
+			}
+
+			// 对端申请还挂着没给结果：直接回 Denied，申请作废
+			bfcp_pending_request_t pending;
+			{
+				std::lock_guard<std::mutex> lk(presentation_mutex_);
+				pending = bfcp_pending_req_;
+				bfcp_pending_req_ = bfcp_pending_request_t();
+			}
+			if (pending.id != 0)
+			{
+				if (log_)
+				{
+					log_->info("BFCP: revoke: deny pending floor request, request_id={}, user={}", pending.id, pending.user_id)->flush();
+				}
+				bfcp_->send(bfcp::build_floor_request_status(bfcp_conference_id_, 0, pending.user_id,
+					pending.floor_request_id, pending.floor_id, bfcp::st_denied));
+				return true;
+			}
+
+			// 只有我方作为主席授予的令牌才能收回；对端自己当主席（FloorStatus 推送）时无权收回
+			if (!bfcp_remote_owned_ || !bfcp_remote_granted_by_us_)
+			{
+				if (log_)
+				{
+					log_->info("BFCP: revoke skipped, remote_owned={}, granted_by_us={}", bfcp_remote_owned_, bfcp_remote_granted_by_us_)->flush();
+				}
+				return false;
+			}
+			// 主席收回令牌：FloorRequestStatus(Revoked) 通知（RFC 4582 §13.1），事务号 0 表示服务端发起
+			bfcp_->send(bfcp::build_floor_request_status(bfcp_conference_id_, 0, bfcp_remote_user_id_,
+				bfcp_remote_floor_request_id_, bfcp_floor_id_, bfcp::st_revoked));
+			if (log_)
+			{
+				log_->info("BFCP: revoke floor from user={}, floor_request_id={}", bfcp_remote_user_id_, bfcp_remote_floor_request_id_)->flush();
+			}
+			bfcp_remote_owned_ = false;
+			bfcp_remote_granted_by_us_ = false;
+			bfcp_remote_floor_request_id_ = 0;
+			// 对端收到 Revoked 后不会再发 FloorRelease，这里直接按对端释放回调 (owned=false, active=false)
+			on_bfcp_presentation_role_changed(false, false);
+			return true;
+		}
+
+		bool sip_call::clear_bfcp_pending_request()
+		{
+			std::lock_guard<std::mutex> lk(presentation_mutex_);
+			bool had = bfcp_pending_req_.id != 0;
+			bfcp_pending_req_ = bfcp_pending_request_t();
+			return had;
+		}
+
+		void sip_call::handle_presentation_response(uint64_t request_id, bool accept)
+		{
+			bfcp_pending_request_t pending;
+			{
+				std::lock_guard<std::mutex> lk(presentation_mutex_);
+				if (bfcp_pending_req_.id == 0 || bfcp_pending_req_.id != request_id)
+				{
+					if (log_)
+					{
+						log_->info("BFCP: floor request response ignored, request_id={} is stale", request_id)->flush();
+					}
+					return;
+				}
+				pending = bfcp_pending_req_;
+				bfcp_pending_req_ = bfcp_pending_request_t();
+			}
+			if (!active_ || !bfcp_)
+			{
+				return;
+			}
+
+			bool grant = accept;
+			// 等待期间我方拿到了令牌或发起了申请（我方要发辅流）：不能再交给对端
+			if (grant && (bfcp_owned_ || bfcp_pending_))
+			{
+				grant = false;
+			}
+			// 最终结果以通知形式发出（事务号 0；RFC 4582 §13.1：先回 Pending，决定后再发 FloorRequestStatus）
+			bfcp_->send(bfcp::build_floor_request_status(bfcp_conference_id_, 0, pending.user_id,
+				pending.floor_request_id, pending.floor_id, grant ? bfcp::st_granted : bfcp::st_denied));
+			if (log_)
+			{
+				log_->info("BFCP: floor request decided, grant={}, upper_accept={}, request_id={}, user={}, floor_request_id={}",
+					grant, accept, request_id, pending.user_id, pending.floor_request_id)->flush();
+			}
+			if (grant)
+			{
+				// 同立即授予分支：对齐 h323 授予对端后的回调 (owned=false, active=true)
+				bfcp_remote_user_id_ = pending.user_id;
+				bfcp_remote_floor_request_id_ = pending.floor_request_id;
+				bfcp_remote_owned_ = true;
+				bfcp_remote_granted_by_us_ = true;
+				on_bfcp_presentation_role_changed(false, true);
+			}
+		}
+
 		void sip_call::on_bfcp_presentation_role_changed(bool owned, bool active)
 		{
 			if (on_presentation_role_changed)
@@ -1695,6 +1798,9 @@ namespace voip
 			bfcp_owned_ = false;
 			bfcp_pending_ = false;
 			bfcp_remote_owned_ = false;
+			bfcp_remote_granted_by_us_ = false;
+			// 挂起的令牌申请作废：通话结束后上层再应答会被忽略
+			clear_bfcp_pending_request();
 		}
 
 		void sip_call::handle_bfcp_message(const bfcp::message& msg, const asio::ip::udp::endpoint& ep)
@@ -1717,13 +1823,50 @@ namespace voip
 					return;
 				}
 
-				// 我方未持有：授予
+				if (on_presentation_request)
+				{
+					// 上层要先决定能不能共享（如问业务平台）：先回 Pending 让对端停止重传，
+					// 上层调 respond_presentation_request 后由 handle_presentation_response 发最终结果
+					uint64_t request_id = 0;
+					bool notify = false;
+					uint16_t floor_request_id = 0;
+					{
+						std::lock_guard<std::mutex> lk(presentation_mutex_);
+						if (bfcp_pending_req_.id == 0)
+						{
+							bfcp_pending_req_.id = next_presentation_request_id();
+							bfcp_pending_req_.floor_request_id = (uint16_t)(sys::util::random_number<uint16_t>(1, 0xFFFE));
+							notify = true;
+						}
+						// 对端重传或在结果出来前重新申请：沿用同一个 request_id 与 Floor Request ID，不重复通知上层
+						bfcp_pending_req_.transaction_id = msg.transaction_id;
+						bfcp_pending_req_.user_id = msg.user_id;
+						bfcp_pending_req_.floor_id = floor_id;
+						request_id = bfcp_pending_req_.id;
+						floor_request_id = bfcp_pending_req_.floor_request_id;
+					}
+					bfcp_->send(bfcp::build_floor_request_status(bfcp_conference_id_, msg.transaction_id, msg.user_id,
+						floor_request_id, floor_id, bfcp::st_pending));
+					if (log_)
+					{
+						log_->info("BFCP: floor request from user={} deferred to upper layer, request_id={}, notify={}",
+							msg.user_id, request_id, notify)->flush();
+					}
+					if (notify)
+					{
+						on_presentation_request(shared_from_this(), request_id);
+					}
+					return;
+				}
+
+				// 我方未持有、上层没有接管决策：立即授予（旧行为）
 				if (bfcp_remote_floor_request_id_ == 0)
 				{
 					bfcp_remote_floor_request_id_ = (uint16_t)(sys::util::random_number<uint16_t>(1, 0xFFFE));
 				}
 				bfcp_remote_user_id_ = msg.user_id;
 				bfcp_remote_owned_ = true;
+				bfcp_remote_granted_by_us_ = true;
 				bfcp_->send(bfcp::build_floor_request_status(bfcp_conference_id_, msg.transaction_id, msg.user_id,
 					bfcp_remote_floor_request_id_, floor_id, bfcp::st_granted));
 				if (log_)
@@ -1739,9 +1882,15 @@ namespace voip
 				// 对端释放（RFC 4582 §13.4）：回 Released 状态
 				bfcp_->send(bfcp::build_floor_request_status(bfcp_conference_id_, msg.transaction_id, msg.user_id,
 					msg.floor_request_id, bfcp_floor_id_, bfcp::st_released));
+				// 对端在结果出来前撤回申请：挂起的申请作废，上层随后的应答会被忽略
+				if (clear_bfcp_pending_request() && log_)
+				{
+					log_->info("BFCP: pending floor request cancelled by release, user={}", msg.user_id)->flush();
+				}
 				if (bfcp_remote_owned_)
 				{
 					bfcp_remote_owned_ = false;
+					bfcp_remote_granted_by_us_ = false;
 					bfcp_remote_floor_request_id_ = 0;
 					on_bfcp_presentation_role_changed(false, false);
 				}
@@ -1850,6 +1999,7 @@ namespace voip
 					|| status == bfcp::st_denied || status == bfcp::st_cancelled))
 				{
 					bfcp_remote_owned_ = false;
+					bfcp_remote_granted_by_us_ = false;
 					bfcp_remote_floor_request_id_ = 0;
 					if (log_)
 					{

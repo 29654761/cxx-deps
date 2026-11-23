@@ -255,6 +255,8 @@ namespace voip
 					return;
 
 				cancel_dtmf();
+				// 挂起的辅流令牌申请作废：通话结束后上层再应答会被忽略
+				clear_h239_pending_request();
 				rtp_->stop();
 				std::error_code ec;
 				timer_.cancel(ec);
@@ -390,28 +392,56 @@ namespace voip
 			}
 			else
 			{
-				// 对端持有令牌时接收方无权替对端释放令牌（H.239），按 H.245 用
-				// RequestChannelClose 请求对端关闭辅流通道（参考 h323plus H245NegLogicalChannel::Close
-				// 对 IsFromRemote 通道的做法）；对端会回 Ack、关通道并回发令牌释放
-				bool requested = false;
+				// 对端持有令牌时接收方无权替对端释放令牌（H.239），改为请求对端交出令牌
+				revoke_presentation_role();
+			}
+		}
+
+		bool h323_call::revoke_presentation_role()
+		{
+			if (h239_token_owned_)
+			{
+				return false;	// 令牌在我方，用 release_presentation_role
+			}
+
+			// 对端申请还挂着没应答：直接回拒绝，申请作废
+			h239_pending_request_t pending;
+			{
+				std::lock_guard<std::mutex> lk(presentation_mutex_);
+				pending = h239_pending_req_;
+				h239_pending_req_ = h239_pending_request_t();
+			}
+			if (pending.id != 0)
+			{
+				if (log_)
 				{
-					std::lock_guard<std::recursive_mutex> lk(opened_remote_channels_mutex_);
-					for (auto itr = opened_remote_channels_.begin(); itr != opened_remote_channels_.end(); itr++)
+					log_->info("H.323: revoke presentation: reject pending request, request_id={}, url={}", pending.id, url_.to_string())->flush();
+				}
+				send_h239_presentation_response(pending.logical_channel, false, pending.terminal_label);
+				return true;
+			}
+
+			// 按 H.245 用 RequestChannelClose 请求对端关闭辅流通道（参考 h323plus H245NegLogicalChannel::Close
+			// 对 IsFromRemote 通道的做法）；对端会回 Ack、关通道并回发令牌释放
+			bool requested = false;
+			{
+				std::lock_guard<std::recursive_mutex> lk(opened_remote_channels_mutex_);
+				for (auto itr = opened_remote_channels_.begin(); itr != opened_remote_channels_.end(); itr++)
+				{
+					if (itr->type == media_channel_type_t::extend)
 					{
-						if (itr->type == media_channel_type_t::extend)
-						{
-							this->send_request_channel_close(itr->channel_number, H245_RequestChannelClose_reason::e_normal);
-							requested = true;
-							break;
-						}
+						this->send_request_channel_close(itr->channel_number, H245_RequestChannelClose_reason::e_normal);
+						requested = true;
+						break;
 					}
 				}
-				if (requested && log_)
-				{
-					std::string url = url_.to_string();
-					log_->info("H.323: release presentation by request channel close, url={}", url)->flush();
-				}
 			}
+			if (requested && log_)
+			{
+				std::string url = url_.to_string();
+				log_->info("H.323: revoke presentation by request channel close, url={}", url)->flush();
+			}
+			return requested;
 		}
 
 		bool h323_call::has_presentation_role()
@@ -3628,6 +3658,35 @@ namespace voip
 			}
 			else if (!h239_token_owned_)
 			{
+				if (on_presentation_request)
+				{
+					// 上层要先决定能不能共享（如问业务平台）：暂不应答，交给上层，
+					// 上层调 respond_presentation_request 后由 handle_presentation_response 发应答
+					uint64_t request_id = 0;
+					bool notify = false;
+					{
+						std::lock_guard<std::mutex> lk(presentation_mutex_);
+						if (h239_pending_req_.id == 0)
+						{
+							h239_pending_req_.id = next_presentation_request_id();
+							notify = true;
+						}
+						// 终端在应答前重发申请：沿用同一个 request_id，只刷新参数，不重复通知上层
+						h239_pending_req_.logical_channel = logical_channel;
+						h239_pending_req_.terminal_label = terminal_label;
+						request_id = h239_pending_req_.id;
+					}
+					if (log_)
+					{
+						log_->info("H.323: H239 presentation request deferred to upper layer, request_id={}, notify={}, url={}",
+							request_id, notify, url_.to_string())->flush();
+					}
+					if (notify)
+					{
+						on_presentation_request(shared_from_this(), request_id);
+					}
+					return;
+				}
 				ack = true; // 11.2.1/H.239 not owned
 				h239_token_channel_ = logical_channel;
 				h239_terminal_label_ = terminal_label;
@@ -3648,6 +3707,57 @@ namespace voip
 					ack, logical_channel, url_.to_string())->flush();
 			}
 			send_h239_presentation_response(logical_channel, ack, terminal_label);
+		}
+
+		void h323_call::handle_presentation_response(uint64_t request_id, bool accept)
+		{
+			h239_pending_request_t pending;
+			{
+				std::lock_guard<std::mutex> lk(presentation_mutex_);
+				if (h239_pending_req_.id == 0 || h239_pending_req_.id != request_id)
+				{
+					if (log_)
+					{
+						log_->info("H.323: H239 presentation response ignored, request_id={} is stale, url={}", request_id, url_.to_string())->flush();
+					}
+					return;
+				}
+				pending = h239_pending_req_;
+				h239_pending_req_ = h239_pending_request_t();
+			}
+			if (!active_)
+			{
+				return;
+			}
+
+			bool ack = accept;
+			// 等待期间我方拿到了令牌或发起了申请（我方要发辅流）：不能再交给对端
+			if (ack && (h239_token_owned_ || h239_symmetry_breaking_ != 0))
+			{
+				ack = false;
+			}
+			if (ack)
+			{
+				// 同 on_h239_presentation_request 的立即同意分支：对端获得令牌，辅流通道随对端 OLC 打开后媒体才到达
+				h239_token_channel_ = pending.logical_channel;
+				h239_terminal_label_ = pending.terminal_label;
+				h239_remote_owned_ = true;
+				on_h239_presentation_role_changed(false, true);
+			}
+			if (log_)
+			{
+				log_->info("H.323: H239 presentation response, acknowledge={}, upper_accept={}, request_id={}, channel={}, url={}",
+					ack, accept, request_id, pending.logical_channel, url_.to_string())->flush();
+			}
+			send_h239_presentation_response(pending.logical_channel, ack, pending.terminal_label);
+		}
+
+		bool h323_call::clear_h239_pending_request()
+		{
+			std::lock_guard<std::mutex> lk(presentation_mutex_);
+			bool had = h239_pending_req_.id != 0;
+			h239_pending_req_ = h239_pending_request_t();
+			return had;
 		}
 
 		void h323_call::on_h239_presentation_response(unsigned logical_channel, unsigned terminal_label, bool rejected)
@@ -3729,7 +3839,12 @@ namespace voip
 				log_->info("H.323: H239 presentation release, channel={}, terminal_label={}, url={}",
 					logical_channel, terminal_label, url_.to_string())->flush();
 			}
-			// 对端（令牌持有者）释放：清理本地状态，残留 owned 会阻塞后续的授予与请求
+			// 对端（令牌持有者）释放：清理本地状态，残留 owned 会阻塞后续的授予与请求。
+			// 对端在我方应答前撤回申请也走这里：挂起的申请作废，上层随后的应答会被忽略
+			if (clear_h239_pending_request() && log_)
+			{
+				log_->info("H.323: H239 pending presentation request cancelled by release, url={}", url_.to_string())->flush();
+			}
 			bool was_owned = h239_token_owned_;
 			h239_token_owned_ = false;
 			h239_remote_owned_ = false;

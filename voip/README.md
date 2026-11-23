@@ -61,5 +61,11 @@ SIP 侧辅流通过 BFCP（RFC 4582，UDP/BFCP）实现，与 H.323 侧的 H.239
 - 端口规划：开启辅流后每个视频呼叫需要 7 个端口（audio/video/extend_video 三对 + BFCP 一个），
   BFCP 从 `set_rtp_ports` 的同一范围分配且绝不复用媒体端口；范围不足时辅流自动禁用
   （日志 `BFCP: bind local port failed, rtp ports ... exhausted`），建议范围 ≥ 8
-- 收到对端 FloorRequest 时本端作为 chair 决策：未持有令牌则授予（Granted），已持有则拒绝（Denied）
+- 收到对端令牌申请（BFCP FloorRequest / H.239 presentationTokenRequest）时本端作为 chair 决策：已持有令牌则直接拒绝（Denied / Reject）；
+  未持有时，若上层注册了 `call::set_on_presentation_request(call, request_id)`，则暂不应答（BFCP 先回 Pending），
+  交给上层决定，上层在任意线程调 `call::respond_presentation_request(request_id, accept)` 后再发最终结果
+  （BFCP 以事务号 0 的 FloorRequestStatus 通知 Granted/Denied，H.239 发 presentationTokenResponse Ack/Reject）；
+  库内不做超时，上层必须应答；对端撤回或通话结束时挂起的申请作废。未注册该回调时保持旧行为：立即授予
+- `call::revoke_presentation_role()` —— 收回对端持有的令牌：H.323 发 RequestChannelClose 请求对端关辅流通道；
+  SIP 仅当令牌是本端作为 chair 授予时发 FloorRequestStatus(Revoked)，对端自己当 chair（FloorStatus 推送）时无法收回、返回 false
 - 对端 offer 中的 H.224（`m=application RTP/AVP 100`）暂不支持，按 RFC 3264 以端口 0 拒绝

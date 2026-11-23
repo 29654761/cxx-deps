@@ -73,6 +73,7 @@ namespace voip
 		asio::io_context& ioc, spdlogger_ptr log)
 		:updated_at_(0)
 		, triggered_connected_(false)
+		, ioc_(ioc)
 		, dtmf_timer_(ioc)
 	{
 		register_default_capabilities();
@@ -566,6 +567,24 @@ namespace voip
 		te_last_end_ts_ = te_.timestamp + duration;
 		te_.ms.reset();
 		dtmf_schedule(DTMF_GAP_MS, &call::dtmf_next);
+	}
+
+	bool call::respond_presentation_request(uint64_t request_id, bool accept)
+	{
+		if (request_id == 0)
+		{
+			return false;
+		}
+		// 应答可能来自上层任意线程（如 HTTP 回调），统一投递到 io 线程，与信令处理同一套线程模型；
+		// 持弱引用，通话已销毁则不再应答
+		std::weak_ptr<call> wself = shared_from_this();
+		asio::post(ioc_, [wself, request_id, accept]() {
+			auto self = wself.lock();
+			if (!self)
+				return;
+			self->handle_presentation_response(request_id, accept);
+		});
+		return true;
 	}
 
 	bool call::is_inactive()const

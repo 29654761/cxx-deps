@@ -83,6 +83,7 @@ namespace voip
 			virtual bool request_presentation_role();
 			virtual void release_presentation_role();
 			virtual bool has_presentation_role();
+			virtual bool revoke_presentation_role();
 			virtual bool remote_addr(std::string& ip, int& port);
 
 			void setup(const voip_uri& url,const std::string& call_id="", const std::string& conf_id="",int call_ref=-1);
@@ -229,6 +230,12 @@ namespace voip
 			void on_h239_presentation_release(unsigned logical_channel,unsigned terminal_label);
 			void on_h239_presentation_indication(unsigned logical_channel, unsigned terminal_label);
 			void on_h239_presentation_role_changed(bool owned, bool active);
+		protected:
+			// 上层对挂起的 presentationTokenRequest 做出决定（io 线程）：发 presentationTokenResponse(Ack/Reject)
+			virtual void handle_presentation_response(uint64_t request_id, bool accept);
+		private:
+			// 丢弃挂起的令牌申请（对端撤回、通话结束），返回是否确有挂起
+			bool clear_h239_pending_request();
 		private:
 			void handle_read_h225(call_ptr call, const std::error_code& ec, std::size_t bytes);
 			void handle_read_h245(call_ptr call, const std::error_code& ec, std::size_t bytes);
@@ -297,6 +304,14 @@ namespace voip
 			unsigned terminal_number_ = 0;
 			bool h239_token_owned_ = false;
 			bool h239_remote_owned_ = false;            // 对端持有令牌（我方已 ack 对端请求或收到 OwnerIndication）
+
+			// 挂起的对端令牌申请：已交给上层（on_presentation_request）决定、尚未应答。受 presentation_mutex_ 保护
+			struct h239_pending_request_t
+			{
+				uint64_t id = 0;                 // 申请标识，0 表示没有挂起的申请
+				unsigned logical_channel = 0;    // 申请里的辅流逻辑通道号，应答时原样带回
+				unsigned terminal_label = 0;     // 申请方的终端标签，应答时原样带回
+			} h239_pending_req_;
 
 			std::atomic<bool> remote_ui_dtmf_{ false };	// 对端能力集声明了 UserInput dtmf（可收 signal 形式的按键）
 			std::atomic<bool> remote_ui_any_{ false };	// 对端能力集声明了任意 UserInput 能力（收不收信令按键）

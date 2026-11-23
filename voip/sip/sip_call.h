@@ -30,6 +30,7 @@ namespace voip
 			virtual bool request_presentation_role();
 			virtual void release_presentation_role();
 			virtual bool has_presentation_role();
+			virtual bool revoke_presentation_role();
 			virtual bool remote_addr(std::string& ip, int& port);
 
 			std::string con_id()const;
@@ -122,6 +123,12 @@ namespace voip
 			void parse_bfcp_attributes(const rtpx::sdp_media& m);
 			// 统一的辅流令牌状态回调出口（对齐 h323 的 on_h239_presentation_role_changed）
 			void on_bfcp_presentation_role_changed(bool owned, bool active);
+			// 丢弃挂起的对端 FloorRequest（对端撤回、通话结束），返回是否确有挂起
+			bool clear_bfcp_pending_request();
+		protected:
+			// 上层对挂起的 FloorRequest 做出决定（io 线程）：发 FloorRequestStatus(Granted/Denied) 通知
+			virtual void handle_presentation_response(uint64_t request_id, bool accept);
+		private:
 		private:
 			std::atomic<bool> active_;
 			bool is_gk_client_ = false;
@@ -179,6 +186,19 @@ namespace voip
 			rtpx::sdp_media bfcp_media_;                // 主叫 offer 的 BFCP application 行声明（add_extend_video_channel 生成）
 			uint16_t bfcp_floor_request_id_ = 0;        // 我方请求的 Floor Request ID（对端分配）
 			uint16_t bfcp_remote_floor_request_id_ = 0; // 对端请求的 Floor Request ID（我方分配）
+			bool bfcp_remote_granted_by_us_ = false;    // 对端令牌是我方作为主席授予的（只有这种我方才能收回）。
+			                                            // 随 bfcp_remote_owned_ 一起清零，所以对端主席路径（FloorStatus/通知）置位时它恒为 false
+
+			// 挂起的对端 FloorRequest：已回 Pending、交给上层（on_presentation_request）决定、尚未给出最终结果。
+			// 受 presentation_mutex_ 保护
+			struct bfcp_pending_request_t
+			{
+				uint64_t id = 0;                 // 申请标识，0 表示没有挂起的申请
+				uint16_t transaction_id = 0;     // 对端 FloorRequest 的事务号（识别 UDP 重传）
+				uint16_t user_id = 0;            // 申请方 user id
+				uint16_t floor_id = 0;           // 申请的 floor
+				uint16_t floor_request_id = 0;   // 我方为这次申请分配的 Floor Request ID
+			} bfcp_pending_req_;
 			uint16_t bfcp_pending_transaction_ = 0;
 			uint16_t bfcp_local_port_ = 0;
 
