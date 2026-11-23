@@ -449,6 +449,13 @@ namespace voip
 			return h239_token_owned_;
 		}
 
+		bool h323_call::has_presentation_capability()
+		{
+			// 与 request_presentation_role 的前置检查一致，但不打日志（调用方会反复查询）
+			media_channel_t remote, local;
+			return tcs_ready_ && has_h239_control() && find_extend_video(remote, local);
+		}
+
 		bool h323_call::remote_addr(std::string& ip, int& port)
 		{
 			std::lock_guard<std::recursive_mutex> lk(mutex_);

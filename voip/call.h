@@ -99,6 +99,10 @@ namespace voip
 		virtual bool request_presentation_role() = 0;
 		virtual void release_presentation_role() = 0;
 		virtual bool has_presentation_role() = 0;
+		// 辅流能力是否已协商可用（此时才可以 request_presentation_role 申请令牌）：
+		// H.323 = 已收到对端能力集，且含 H.239 控制能力与双方兼容的辅流视频能力；SIP = SDP 协商出了 BFCP。
+		// 能力集/SDP 还没交换完时同样返回 false，调用方可在 on_open_media 等时机再查。默认 false
+		virtual bool has_presentation_capability() { return false; }
 		// 应答一次挂起的辅流令牌申请（见 on_presentation_request_t）。可在任意线程调用：
 		// 实际应答投递到本通话的 io 线程执行。accept=true 发同意（H.239 Ack / BFCP Granted），
 		// 随后回调 on_presentation_role_changed(false, true)；accept=false 发拒绝（H.239 Reject / BFCP Denied）。

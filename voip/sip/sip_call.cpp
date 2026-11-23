@@ -518,6 +518,11 @@ namespace voip
 			return bfcp_owned_;
 		}
 
+		bool sip_call::has_presentation_capability()
+		{
+			return bfcp_ && bfcp_negotiated_;
+		}
+
 		bool sip_call::revoke_presentation_role()
 		{
 			if (!bfcp_ || !bfcp_negotiated_ || bfcp_owned_)

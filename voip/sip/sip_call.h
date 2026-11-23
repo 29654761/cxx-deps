@@ -30,6 +30,7 @@ namespace voip
 			virtual bool request_presentation_role();
 			virtual void release_presentation_role();
 			virtual bool has_presentation_role();
+			virtual bool has_presentation_capability();
 			virtual bool revoke_presentation_role();
 			virtual bool remote_addr(std::string& ip, int& port);
 
