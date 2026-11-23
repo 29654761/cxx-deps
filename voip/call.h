@@ -99,6 +99,16 @@ namespace voip
 		virtual bool request_presentation_role() = 0;
 		virtual void release_presentation_role() = 0;
 		virtual bool has_presentation_role() = 0;
+		// 撤销我方在途的辅流令牌申请（request_presentation_role 已发出、对端还没给结果），复位本地申请状态，
+		// 之后可以重新 request_presentation_role。用于上层等应答超时后放弃（release_presentation_role 不能代替：
+		// H.323 未持有令牌时它会变成收回对端令牌）。
+		// 与 request/release_presentation_role 一样在调用线程同步执行、不投递：保证紧随其后的新申请不会被它撤掉。
+		// 不回调 on_presentation_role_changed。
+		// - SIP：发 FloorRelease 撤销 pending 的请求（RFC 4582），对端还没回过 Floor Request ID 时只复位本地；
+		// - H.323：H.239 没有撤回申请的消息，只复位本地状态。
+		// 撤销后对端迟到的授予由库立即交还（SIP FloorRelease / H.323 presentationTokenRelease），迟到的拒绝忽略，都不回调上层。
+		// 没有在途申请（没申请过、已持有令牌、已有结果）返回 false；默认不支持，返回 false
+		virtual bool cancel_presentation_request() { return false; }
 		// 辅流能力是否已协商可用（此时才可以 request_presentation_role 申请令牌）：
 		// H.323 = 已收到对端能力集，且含 H.239 控制能力与双方兼容的辅流视频能力；SIP = SDP 协商出了 BFCP。
 		// 能力集/SDP 还没交换完时同样返回 false，调用方可在 on_open_media 等时机再查。默认 false

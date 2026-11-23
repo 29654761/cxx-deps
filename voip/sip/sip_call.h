@@ -30,6 +30,7 @@ namespace voip
 			virtual bool request_presentation_role();
 			virtual void release_presentation_role();
 			virtual bool has_presentation_role();
+			virtual bool cancel_presentation_request();
 			virtual bool has_presentation_capability();
 			virtual bool revoke_presentation_role();
 			virtual bool remote_addr(std::string& ip, int& port);
@@ -126,6 +127,8 @@ namespace voip
 			void on_bfcp_presentation_role_changed(bool owned, bool active);
 			// 丢弃挂起的对端 FloorRequest（对端撤回、通话结束），返回是否确有挂起
 			bool clear_bfcp_pending_request();
+			// 已撤销申请迟到的 FloorRequestStatus：认出来就处理掉（授予/排队中的立即 FloorRelease），返回 true 表示已处理
+			bool handle_cancelled_floor_request_status(const bfcp::message& msg, uint8_t status);
 		protected:
 			// 上层对挂起的 FloorRequest 做出决定（io 线程）：发 FloorRequestStatus(Granted/Denied) 通知
 			virtual void handle_presentation_response(uint64_t request_id, bool accept);
@@ -189,6 +192,11 @@ namespace voip
 			uint16_t bfcp_remote_floor_request_id_ = 0; // 对端请求的 Floor Request ID（我方分配）
 			bool bfcp_remote_granted_by_us_ = false;    // 对端令牌是我方作为主席授予的（只有这种我方才能收回）。
 			                                            // 随 bfcp_remote_owned_ 一起清零，所以对端主席路径（FloorStatus/通知）置位时它恒为 false
+			// 我方撤销过（cancel_presentation_request）、对端还可能迟到应答的申请，用来认出迟到的 FloorRequestStatus：
+			// 授予就立即 FloorRelease 交还，拒绝/已释放就忘掉它；都不回调上层
+			bool bfcp_cancelled_ = false;
+			uint16_t bfcp_cancelled_transaction_ = 0;       // 被撤销申请的 FloorRequest 事务号
+			uint16_t bfcp_cancelled_floor_request_id_ = 0;  // 被撤销申请的 Floor Request ID（非 0 表示已对它发过 FloorRelease）
 
 			// 挂起的对端 FloorRequest：已回 Pending、交给上层（on_presentation_request）决定、尚未给出最终结果。
 			// 受 presentation_mutex_ 保护

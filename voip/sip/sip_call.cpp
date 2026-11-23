@@ -485,6 +485,8 @@ namespace voip
 			uint16_t tid = make_bfcp_transaction_id();
 			bfcp_pending_transaction_ = tid;
 			bfcp_pending_ = true;
+			// 新申请的 Floor Request ID 由对端在应答里分配，清掉上一次残留的，避免撤销时 FloorRelease 带错 ID
+			bfcp_floor_request_id_ = 0;
 			// FloorRequest = 我方请求辅流令牌（对齐 h323 send_h239_presentation_request）
 			bfcp_->send(bfcp::build_floor_request(bfcp_conference_id_, tid, bfcp_user_id_, bfcp_floor_id_, bfcp_user_id_));
 			return true;
@@ -516,6 +518,94 @@ namespace voip
 		bool sip_call::has_presentation_role()
 		{
 			return bfcp_owned_;
+		}
+
+		bool sip_call::cancel_presentation_request()
+		{
+			if (!bfcp_ || !bfcp_negotiated_ || !bfcp_pending_ || bfcp_owned_)
+			{
+				return false;
+			}
+			// 记下被撤销的申请：对端可能已经在处理，之后迟到的授予要认出来并交还（见 handle_cancelled_floor_request_status）
+			bfcp_cancelled_ = true;
+			bfcp_cancelled_transaction_ = bfcp_pending_transaction_;
+			bfcp_cancelled_floor_request_id_ = bfcp_floor_request_id_;
+			// RFC 4582：FloorRelease 带 FLOOR-REQUEST-ID 撤销仍在 pending 的请求。
+			// ID 由对端在应答（Pending/Accepted）里分配，对端一直没应答时拿不到，只能复位本地
+			if (bfcp_floor_request_id_ > 0)
+			{
+				uint16_t tid = make_bfcp_transaction_id();
+				bfcp_->send(bfcp::build_floor_release(bfcp_conference_id_, tid, bfcp_user_id_, bfcp_floor_request_id_));
+			}
+			if (log_)
+			{
+				log_->info("BFCP: cancel pending floor request, transaction={}, floor_request_id={}",
+					bfcp_pending_transaction_, bfcp_floor_request_id_)->flush();
+			}
+			bfcp_pending_ = false;
+			bfcp_pending_transaction_ = 0;
+			bfcp_floor_request_id_ = 0;
+			return true;
+		}
+
+		bool sip_call::handle_cancelled_floor_request_status(const bfcp::message& msg, uint8_t status)
+		{
+			if (!bfcp_cancelled_)
+			{
+				return false;
+			}
+			// 认定为已撤销申请的消息：事务号或 Floor Request ID 对得上；或者我方既没在申请也没持有令牌时，
+			// 对端通知把 floor 授予了我方（BENEFICIARY-ID 是我们）
+			bool match = (msg.transaction_id != 0 && msg.transaction_id == bfcp_cancelled_transaction_)
+				|| (msg.floor_request_id != 0 && msg.floor_request_id == bfcp_cancelled_floor_request_id_)
+				|| (msg.transaction_id == 0 && !bfcp_pending_ && !bfcp_owned_
+					&& msg.beneficiary_id != 0 && msg.beneficiary_id == bfcp_user_id_);
+			if (!match)
+			{
+				return false;
+			}
+			if (status == bfcp::st_granted)
+			{
+				// 撤销后对端还是授予了：立即交还，不让对端以为我方在共享（重发一次 FloorRelease 也无害）。不回调上层
+				if (msg.floor_request_id > 0)
+				{
+					uint16_t tid = make_bfcp_transaction_id();
+					bfcp_->send(bfcp::build_floor_release(bfcp_conference_id_, tid, bfcp_user_id_, msg.floor_request_id));
+				}
+				if (log_)
+				{
+					log_->info("BFCP: late grant of cancelled floor request, released, floor_request_id={}", msg.floor_request_id)->flush();
+				}
+				bfcp_cancelled_ = false;
+				bfcp_cancelled_transaction_ = 0;
+				bfcp_cancelled_floor_request_id_ = 0;
+			}
+			else if (status == bfcp::st_pending || status == bfcp::st_accepted)
+			{
+				// 撤销时还不知道 Floor Request ID、现在才拿到：补发 FloorRelease 撤销它；继续记着，防后面还有授予
+				if (msg.floor_request_id > 0 && msg.floor_request_id != bfcp_cancelled_floor_request_id_)
+				{
+					uint16_t tid = make_bfcp_transaction_id();
+					bfcp_->send(bfcp::build_floor_release(bfcp_conference_id_, tid, bfcp_user_id_, msg.floor_request_id));
+					bfcp_cancelled_floor_request_id_ = msg.floor_request_id;
+					if (log_)
+					{
+						log_->info("BFCP: late status of cancelled floor request, release sent, floor_request_id={}", msg.floor_request_id)->flush();
+					}
+				}
+			}
+			else
+			{
+				// 拒绝/已释放/已取消/收回：这次申请彻底结束
+				if (log_)
+				{
+					log_->debug("BFCP: cancelled floor request finished, status={}", (int)status)->flush();
+				}
+				bfcp_cancelled_ = false;
+				bfcp_cancelled_transaction_ = 0;
+				bfcp_cancelled_floor_request_id_ = 0;
+			}
+			return true;
 		}
 
 		bool sip_call::has_presentation_capability()
@@ -1804,6 +1894,9 @@ namespace voip
 			bfcp_pending_ = false;
 			bfcp_remote_owned_ = false;
 			bfcp_remote_granted_by_us_ = false;
+			bfcp_cancelled_ = false;
+			bfcp_cancelled_transaction_ = 0;
+			bfcp_cancelled_floor_request_id_ = 0;
 			// 挂起的令牌申请作废：通话结束后上层再应答会被忽略
 			clear_bfcp_pending_request();
 		}
@@ -1907,6 +2000,12 @@ namespace voip
 				uint8_t status = msg.overall_status != 0 ? msg.overall_status : msg.status;
 				bool is_response = (msg.transaction_id == bfcp_pending_transaction_ && bfcp_pending_transaction_ != 0);
 				bool is_notify = (msg.transaction_id == 0);
+
+				// 我方已撤销的申请迟到的应答/通知：先认出来单独处理，不能当成当前申请的结果
+				if (handle_cancelled_floor_request_status(msg, status))
+				{
+					break;
+				}
 
 				if (bfcp_pending_ && (is_response || is_notify))
 				{

@@ -449,6 +449,27 @@ namespace voip
 			return h239_token_owned_;
 		}
 
+		bool h323_call::cancel_presentation_request()
+		{
+			// h239_symmetry_breaking_ 非 0 = 我方 presentationTokenRequest 已发出、还没收到 presentationTokenResponse
+			if (h239_token_owned_ || h239_symmetry_breaking_ == 0)
+			{
+				return false;
+			}
+			// H.239 没有撤回申请的消息，只复位本地在途状态。不复位的话：终端之后按共享键会被当成
+			// 「双方同时申请」走对称破除，绕过上层（平台）决定；上层同意终端申请时也会因「我方在申请」被改成拒绝。
+			// 终端迟到的 Ack 由 on_h239_presentation_response 按「不是我方在途申请」立即 presentationTokenRelease 交还
+			if (log_)
+			{
+				log_->info("H.323: cancel pending presentation request, channel={}, symmetry={}, url={}",
+					h239_token_channel_, h239_symmetry_breaking_, url_.to_string())->flush();
+			}
+			h239_symmetry_breaking_ = 0;
+			h239_token_channel_ = 0;
+			h239_terminal_label_ = 0;
+			return true;
+		}
+
 		bool h323_call::has_presentation_capability()
 		{
 			// 与 request_presentation_role 的前置检查一致，但不打日志（调用方会反复查询）
@@ -3774,10 +3795,14 @@ namespace voip
 				log_->info("H.323: H239 presentation response, channel={}, terminal_label={}, rejected={}, pending_symmetry={}, url={}",
 					logical_channel, terminal_label, rejected, h239_symmetry_breaking_, url_.to_string())->flush();
 			}
-			// Did we request it?
+			// Did we request it? 不是我方在途的申请（含 cancel_presentation_request 撤销后迟到的应答）：
+			// 同意就立即交还令牌，不让终端以为我方在共享；拒绝本来就没给令牌，忽略
 			if (h239_symmetry_breaking_ == 0)
 			{
-				send_h239_presentation_release(logical_channel, terminal_label); // No
+				if (!rejected)
+				{
+					send_h239_presentation_release(logical_channel, terminal_label);
+				}
 				return;
 			}
 

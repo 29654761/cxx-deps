@@ -50,6 +50,10 @@ SIP 侧辅流通过 BFCP（RFC 4582，UDP/BFCP）实现，与 H.323 侧的 H.239
 - `call::request_presentation_role()` —— 发送 FloorRequest 请求辅流令牌
 - `call::release_presentation_role()` —— 发送 FloorRelease 释放令牌
 - `call::has_presentation_role()` —— 令牌持有状态
+- `call::cancel_presentation_request()` —— 撤销我方在途的令牌申请（等应答超时后放弃用），复位后可重新申请；
+  SIP 发 FloorRelease（带对端分配的 Floor Request ID，还没拿到时只复位本地），H.323 的 H.239 没有撤回消息、只复位本地。
+  之后对端迟到的授予由库立即交还（FloorRelease / presentationTokenRelease），迟到的拒绝忽略，都不回调上层。
+  不能用 `release_presentation_role()` 代替：H.323 未持有令牌时它会变成收回对端令牌
 - `call::has_presentation_capability()` —— 辅流能力是否已协商可用（H.323 收到含 H.239 与兼容辅流视频的能力集 / SIP 协商出 BFCP）；
   协商完成前也返回 false。`request_presentation_role()` 同步返回 false 时可据此区分「还没有/不支持辅流」与「申请在途、已持有」
 - `call::set_on_presentation_role_changed(call, owned, active)` —— 授予/拒绝/释放/收回时回调
