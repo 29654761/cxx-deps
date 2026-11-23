@@ -1,5 +1,6 @@
 #include "rtc_client.h"
 #include <sys2/util.h>
+#include <json/reader.h>
 
 rtc_client::rtc_client(asio::io_service& ios)
 	:ios_(ios), timer_(ios)
@@ -434,6 +435,28 @@ bool rtc_client::get_user(const std::string& uid, rtc_user& user)
 	user.from_struct(&info);
 	rtc_free_user_info(&info);
 
+	return true;
+}
+
+bool rtc_client::get_channel_props(Json::Value& props)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!handle_)
+		return false;
+
+	rtc_channel_info_t info = {};
+	int r = rtc_get_channel_info(handle_, &info);
+	if (r != RTC_OK)
+		return false;
+
+	props = Json::Value::null;
+	if (info.props && info.props[0])
+	{
+		Json::CharReaderBuilder b;
+		std::unique_ptr<Json::CharReader> reader(b.newCharReader());
+		reader->parse(info.props, info.props + strlen(info.props), &props, nullptr);
+	}
+	rtc_free_channel_info(&info);
 	return true;
 }
 

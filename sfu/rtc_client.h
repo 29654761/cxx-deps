@@ -64,6 +64,9 @@ public:
 
 	bool all_users(std::vector<rtc_user>& users);
 	bool get_user(const std::string& uid, rtc_user& user);
+	// 取频道自定义属性（rtc_get_channel_info 的 props，JSON 对象）。未入会/取不到返回 false；
+	// props 为空串时 props 置为 null 并返回 true。rtc-go 收到 channel_update 会控消息后即更新，C 接口没有变化回调，需要时主动来取
+	bool get_channel_props(Json::Value& props);
 
 	bool request_key_frame(const std::string& uid, const std::string& track_id);
 	bool switch_layer(const std::string& pub_uid, const std::string& track_id, const std::string& target_track_id);
