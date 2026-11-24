@@ -242,7 +242,13 @@ void sip_server::handle_timer(sip_server_ptr svr, const std::error_code& ec)
 sip_connection_ptr sip_server::create_connection(const voip_uri& url, bool tcp)
 {
 	if (url.host.empty())
+	{
+		if (log_)
+		{
+			log_->error("SIP create connection failed: url has no host. user={}", url.username)->flush();
+		}
 		return nullptr;
+	}
 
 	int port = url.port != 0 ? url.port : 5060;
 
@@ -250,7 +256,14 @@ sip_connection_ptr sip_server::create_connection(const voip_uri& url, bool tcp)
 	std::error_code ec;
 	auto addr=asio::ip::address::from_string(url.host, ec);
 	if (ec)
+	{
+		if (log_)
+		{
+			// from_string 只认 IP 字面量：目标是域名时会走到这里（目前不支持域名拨号）
+			log_->error("SIP create connection failed: target is not an IP address. host={}", url.host)->flush();
+		}
 		return nullptr;
+	}
 
 	if (tcp)
 	{

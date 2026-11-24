@@ -105,6 +105,8 @@ namespace voip
 			// 对端 183（Session Progress）处理：应用早媒体 SDP 并通知呼叫进行中
 			void on_progress(const sip_message& msg);
 			void handle_timer(call_ptr call,const std::error_code& ec);
+			// stop() 的延迟收尾（关连接/清引用/销毁回调）：给挂断信令的异步写出与对端应答留窗口
+			void handle_stop_teardown(call_ptr call, sip_connection_ptr con, voip::call::reason_code_t reason, const std::error_code& ec);
 			void handle_sipcon_close(call_ptr call, sip_connection_ptr con);
 
 			void set_con(sip_connection_ptr con);
@@ -138,6 +140,8 @@ namespace voip
 			bool is_gk_client_ = false;
 			endpoint_ptr ep_;
 			asio::steady_timer timer_;
+			// stop() 专用收尾定时器：与 1 秒心跳 timer_ 分开，避免收尾等待被心跳重挂取消
+			asio::steady_timer stop_timer_;
 
 			mutable std::mutex con_mutex_;
 			sip_connection_ptr con_tmp_;

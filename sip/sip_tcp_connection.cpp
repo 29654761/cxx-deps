@@ -1,5 +1,6 @@
 #include "sip_tcp_connection.h"
 #include "sip_server.h"
+#include <atomic>
 
 sip_tcp_connection::sip_tcp_connection(asio::io_context& ioc, socket_ptr socket):
 	sip_connection(ioc),
@@ -16,6 +17,11 @@ sip_tcp_connection::sip_tcp_connection(asio::io_context& ioc, socket_ptr socket)
 	sending_queue_ = std::make_shared<asio::sending_queue>();
 }
 
+// 呼出连接 id 的唯一序号：id 只由远端地址构成时，同目标地址的并发呼出连接会在
+// sip_server 的连接表里撞 key（add_connection 对冲突 key 会替换并 stop 旧连接，
+// 误杀同目标地址的在途呼叫），呼出方向必须逐条区分
+static std::atomic<uint64_t> s_outgoing_con_seq{ 0 };
+
 sip_tcp_connection::sip_tcp_connection(asio::io_context& ioc, const asio::ip::tcp::endpoint& ep)
 	:sip_connection(ioc),
 	recv_ring_buffer_(1024 * 1024)
@@ -26,7 +32,7 @@ sip_tcp_connection::sip_tcp_connection(asio::io_context& ioc, const asio::ip::tc
 	asio::error_code ec;
 	std::string ip = ep.address().to_string(ec);
 	int port = ep.port();
-	id_ = make_id("tcp", ip, port);
+	id_ = make_id("tcp", ip, port) + "$" + std::to_string(++s_outgoing_con_seq);
 
 	sending_queue_ = std::make_shared<asio::sending_queue>();
 }
@@ -58,12 +64,22 @@ bool sip_tcp_connection::start()
 		socket_->open(remote_ep_.protocol(), ec);
 		if (ec)
 		{
+			if (log_)
+			{
+				log_->error("SIP connection open socket failed: {}:{}: {}",
+					remote_ep_.address().to_string(), remote_ep_.port(), ec.message())->flush();
+			}
 			stop();
 			return false;
 		}
 		socket_->connect(remote_ep_,ec);
 		if (ec)
 		{
+			if (log_)
+			{
+				log_->error("SIP connection connect failed: {}:{}: {}",
+					remote_ep_.address().to_string(), remote_ep_.port(), ec.message())->flush();
+			}
 			stop();
 			return false;
 		}
@@ -89,7 +105,9 @@ void sip_tcp_connection::stop()
 
 bool sip_tcp_connection::send_message(const sip_message& message)
 {
-	if (!socket_)
+	// 已停/未启动的连接不再排队发送：sending_queue 的异步写在已关闭的 socket 上必然失败，
+	// 排进去只会让 "Send sip message" 日志看起来发出去了（实际被静默丢弃）
+	if (!socket_ || !active_)
 	{
 		return false;
 	}

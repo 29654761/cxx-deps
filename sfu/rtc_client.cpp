@@ -2,6 +2,13 @@
 #include <sys2/util.h>
 #include <json/reader.h>
 
+// rtc_set_device_type 是 librtc 0.3.0 接口；本地 E:/cxx-build/srtc 的 SDK 仍是 0.2.0
+// （头文件无此声明、库无此导出），直接调用编译/链接都过不了。SDK 升级后定义
+// RTC_HAS_SET_DEVICE_TYPE=1 即启用，本地默认关闭
+#ifndef RTC_HAS_SET_DEVICE_TYPE
+#define RTC_HAS_SET_DEVICE_TYPE 0
+#endif
+
 rtc_client::rtc_client(asio::io_service& ios)
 	:ios_(ios), timer_(ios)
 {
@@ -79,8 +86,13 @@ bool rtc_client::set_device_type(int device_type)
 		return false;
 
 	// 只在入会时上报一次，必须在 join_channel 之前设置
+#if RTC_HAS_SET_DEVICE_TYPE
 	rtc_set_device_type(handle_, device_type);
 	return true;
+#else
+	(void)device_type;
+	return false;
+#endif
 }
 
 bool rtc_client::join_channel(const char* token)

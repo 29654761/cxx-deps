@@ -13,6 +13,7 @@ namespace voip
 			,cseq_base_(1)
 			,ep_(ep)
 			,timer_(ep_->io_context())
+			,stop_timer_(ep_->io_context())
 			, active_(false)
 		{
 			con_tmp_ = con;
@@ -49,6 +50,11 @@ namespace voip
 				mid = "audio";
 			auto ms = rtp_->create_media_stream(media_type_audio, mid, false, "", "", rtp_trans_mode_sendrecv, false);
 			if (!ms) {
+				if (log_)
+				{
+					log_->error("SIP call {} start failed: create audio media stream '{}' failed (rtp port range exhausted?)",
+						call_id_, mid)->flush();
+				}
 				return false;
 			}
 			ms->use_rtp_endpoint(use_rtp_address_);
@@ -59,7 +65,15 @@ namespace voip
 			{
 				ms->add_local_format(fmt);
 			}
-			return fmts.size() > 0;
+			if (fmts.size() == 0)
+			{
+				if (log_)
+				{
+					log_->error("SIP call {} start failed: no audio formats in global capabilities", call_id_)->flush();
+				}
+				return false;
+			}
+			return true;
 		}
 
 		bool sip_call::add_video_channel()
@@ -69,6 +83,11 @@ namespace voip
 				mid = "video";
 			auto ms = rtp_->create_media_stream(media_type_video, mid, false, "", "", rtp_trans_mode_sendrecv, false);
 			if (!ms) {
+				if (log_)
+				{
+					log_->error("SIP call {} start failed: create video media stream '{}' failed (rtp port range exhausted?)",
+						call_id_, mid)->flush();
+				}
 				return false;
 			}
 			ms->use_rtp_endpoint(use_rtp_address_);
@@ -80,7 +99,15 @@ namespace voip
 				fmt.fmtp.set_mbr(max_bitrate_);
 				ms->add_local_format(fmt);
 			}
-			return fmts.size() > 0;
+			if (fmts.size() == 0)
+			{
+				if (log_)
+				{
+					log_->error("SIP call {} start failed: no video formats in global capabilities", call_id_)->flush();
+				}
+				return false;
+			}
+			return true;
 		}
 
 		bool sip_call::add_extend_video_channel()
@@ -206,12 +233,21 @@ namespace voip
 			auto con = get_con();
 			if (!con)
 			{
+				if (log_)
+				{
+					log_->error("SIP call start failed: no connection. id={}, url={}", call_id_, url_.to_string())->flush();
+				}
 				stop(call::reason_code_t::sip_connect_failed);
 				return false;
 			}
 			auto self = shared_from_this();
 			if (!con->start())
 			{
+				if (log_)
+				{
+					log_->error("SIP call start failed: connection start failed (see SIP connection log). id={}, url={}",
+						call_id_, url_.to_string())->flush();
+				}
 				stop(call::reason_code_t::sip_connect_failed);
 				return false;
 			}
@@ -238,6 +274,10 @@ namespace voip
 					if (content_support_ && !add_extend_video_channel())
 					{
 						content_support_ = false;
+						if (log_)
+						{
+							log_->info("SIP call {}: extend video unavailable, offer without presentation", call_id_)->flush();
+						}
 					}
 				}
 
@@ -311,36 +351,41 @@ namespace voip
 			{
 				if (got_ack)
 				{
-					// 对话已确认（发出/收到 ACK）：只能用 BYE 结束，重试至多 3 次等对端回 200/发 BYE
-					for (int i = 0; i < 3; i++)
-					{
-						if (got_bye)
-							break;
+					// 对话已确认（发出/收到 ACK）：只能用 BYE 结束。只发一次：TCP 由传输层保证送达，
+					// 此前重试 3 次且每次原地 sleep 1 秒，会把调用线程阻塞数秒（同目标并发拨号曾被连带卡 3 秒）
+					if (!got_bye)
 						bye();
-						std::this_thread::sleep_for(std::chrono::seconds(1));
-					}
 				}
 				else if (direction_ == direction_t::outgoing && invite_pending_)
 				{
-					// 主叫且 INVITE 尚未接通：必须发 CANCEL 撤销未决 INVITE（RFC 3261 §9）。
-					// 此前这里什么都不发，对端终端会一直振铃到自身超时；重试至多 3 次等终极响应
-					for (int i = 0; i < 3; i++)
-					{
-						if (got_invite_final_rsp)
-							break;
+					// 主叫且 INVITE 尚未接通：发 CANCEL 撤销未决 INVITE（RFC 3261 §9），同样只发一次
+					if (!got_invite_final_rsp)
 						cancel();
-						std::this_thread::sleep_for(std::chrono::seconds(1));
-					}
 				}
 				else if (direction_ == direction_t::incoming && !got_invite_final_rsp)
 				{
-					// 被叫且尚未应答：给未决 INVITE 回 603 拒绝，终止事务（此前也是什么都不发，
-					// 主叫方要等到超时才知道呼叫无人应答）
+					// 被叫且尚未应答：给未决 INVITE 回 603 拒绝，终止事务
 					refuse();
 				}
 			}
-			clear_con();
 
+			// 收尾（关连接/清引用/销毁回调）延后 500ms 在 io 线程执行，不再原地 sleep 等待：
+			// 1) sending_queue 是异步写出，立刻关 socket 会掐断刚排队的 BYE/CANCEL；
+			// 2) 这个窗口同时给对端回终极响应/BYE 留时间（替代原先的重试等待）。
+			// 用独立的 stop_timer_：与 1 秒心跳 timer_ 共用一个对象会被心跳重挂取消，收尾就丢了
+			auto self = shared_from_this();
+			stop_timer_.expires_after(std::chrono::milliseconds(500));
+			stop_timer_.async_wait(std::bind(&sip_call::handle_stop_teardown, this, self, con, reason, std::placeholders::_1));
+		}
+
+		void sip_call::handle_stop_teardown(call_ptr call, sip_connection_ptr con, voip::call::reason_code_t reason, const std::error_code& ec)
+		{
+			if (ec)
+				return;
+
+			// 先清引用再关连接：con->stop() 会触发 remove_connection → endpoint::handle_close，
+			// 按连接对象匹配时本呼叫已不持有该连接，不会又被回调 stop 进来
+			clear_con();
 			if (!is_gk_client_)
 			{
 				if (con)
@@ -350,8 +395,7 @@ namespace voip
 			}
 			if (on_destroy)
 			{
-				auto self = shared_from_this();
-				on_destroy(self, reason);
+				on_destroy(call, reason);
 			}
 		}
 
@@ -1206,7 +1250,13 @@ namespace voip
 		{
 			auto con = get_con();
 			if (!con)
+			{
+				if (log_)
+				{
+					log_->error("SIP call {} invite failed: no connection", call_id_)->flush();
+				}
 				return false;
+			}
 			//url_.SetScheme
 			uint32_t cseq = get_cseq();
 			std::string branch = endpoint::create_branch();
@@ -1241,6 +1291,10 @@ namespace voip
 			rtpx::sdp sdp;
 			if (!rtp_->create_offer(sdp))
 			{
+				if (log_)
+				{
+					log_->error("SIP call {} invite failed: create sdp offer failed", call_id_)->flush();
+				}
 				return false;
 			}
 			postprocess_local_sdp(sdp);
@@ -1268,7 +1322,13 @@ namespace voip
 			//ss << "a=sendrecv\r\n";
 			//std::string s = ss.str();
 			req.set_body(s);
-			return con->send_message(req);
+			bool sent = con->send_message(req);
+			if (!sent && log_)
+			{
+				log_->error("SIP call {} invite failed: send INVITE failed (connection stopped or sending queue full)",
+					call_id_)->flush();
+			}
+			return sent;
 		}
 
 		bool sip_call::invite_rsp(const sip_message& invite,const std::string& sdp)

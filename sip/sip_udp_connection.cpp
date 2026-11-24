@@ -9,6 +9,10 @@ sip_udp_connection::sip_udp_connection(asio::io_context& ioc, socket_ptr socket,
 	std::string ip;
 	int port = 0;
 	this->remote_address(ip, port);
+	// id 必须保持纯远端地址（不要学 sip_tcp_connection 呼出方向加唯一后缀）：
+	// handle_read 按远端 id 查表，出向 con 挂在纯 id 下才兼作该远端的收包通道，靠响应刷新 180s 超时；
+	// 加后缀会留在表里收不到 on_message，被服务器定时器回收后误挂在途通话。
+	// 同目标并发呼出的撞 key 由 endpoint::handle_close 的对象级匹配兜底（不会误停呼叫）
 	id_ = make_id("udp", ip, port);
 }
 

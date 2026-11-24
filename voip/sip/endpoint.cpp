@@ -191,13 +191,25 @@ namespace voip
 		call_ptr endpoint::make_call(const std::string& url, const std::string& local_alias, bool tcp)
 		{
 			if (!active_ || !server_)
+			{
+				if (log_)
+				{
+					log_->error("SIP make call failed: endpoint not active. url={}", url)->flush();
+				}
 				return nullptr;
+			}
 
 			voip_uri vurl(url);
 			vurl.scheme = "sip";
 			auto con=server_->create_connection(vurl, tcp);
 			if (!con)
+			{
+				if (log_)
+				{
+					log_->error("SIP make call failed: create connection failed. url={}", url)->flush();
+				}
 				return nullptr;
+			}
 
 			auto self = shared_from_this();
 
@@ -560,7 +572,18 @@ namespace voip
 
 		void endpoint::handle_close(endpoint_ptr ep, sip_server_ptr svr, sip_connection_ptr con)
 		{
-			auto call = find_call_by_connection(con->id());
+			// 按连接对象匹配持有该连接的呼叫：连接 id 只含远端地址，同目标地址的并发呼出连接
+			// id 相同，按 id 字符串匹配会误停别的呼叫（保持旧语义：多个命中取最后一个）
+			std::vector<std::shared_ptr<sip_call>> calls;
+			all_calls(calls);
+			std::shared_ptr<sip_call> call;
+			for (auto itr = calls.begin(); itr != calls.end(); itr++)
+			{
+				if ((*itr)->get_con() == con)
+				{
+					call = *itr;
+				}
+			}
 			if (call)
 			{
 				call->stop(call::reason_code_t::ok);
