@@ -201,8 +201,9 @@ namespace rtpx {
 				auto iter = this->medias.rbegin();
 				if (iter != medias.rend())
 				{
+					// GB28181 的 y= 是 10 位十进制 SSRC，常以 0 开头（如 0200000017），按十进制解析，不能用 0（会被当成八进制）
 					char* endptr = nullptr;
-					iter->y=strtoul(val.c_str(),&endptr,0);
+					iter->y=strtoul(val.c_str(),&endptr,10);
 				}
 			}
 		}
