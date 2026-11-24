@@ -260,7 +260,7 @@ namespace voip
 				rtp_->stop();
 				std::error_code ec;
 				timer_.cancel(ec);
-				if (h245_skt_)
+				if (h245_ready())
 				{
 					this->close_local_channels();
 					this->close_remote_channels();
@@ -271,7 +271,8 @@ namespace voip
 					{
 						gkclient_->send_disengage_request(H225_DisengageReason::e_undefinedReason, call_id_, conf_id_, call_ref_);
 					}
-					h245_skt_->cancel(ec);
+					if (h245_skt_)
+						h245_skt_->cancel(ec);
 				}
 				h245_listen_.close(ec);
 
@@ -625,6 +626,109 @@ namespace voip
 			return true;
 		}
 
+		bool h323_call::send_h245(const PBYTEArray& pdu)
+		{
+			if (!h245_tunnel_active_)
+			{
+				if (!h245_skt_)
+					return false;
+				PBYTEArray buf = tpkt::serialize(pdu);
+				return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			}
+
+			// 隧道：H.245 消息原样（不加 TPKT）放进 h245Control，用 transportedInformation 的 Facility 承载
+			H225_H323_UserInformation ui;
+			ui.SetTag(H225_H323_UserInformation::e_user_data);
+			ui.m_h323_uu_pdu.m_h323_message_body.SetTag(H225_H323_UU_PDU_h323_message_body::e_facility);
+			ui.m_h323_uu_pdu.IncludeOptionalField(H225_H323_UU_PDU::e_h245Tunneling);
+			ui.m_h323_uu_pdu.m_h245Tunneling = true;
+			ui.m_h323_uu_pdu.IncludeOptionalField(H225_H323_UU_PDU::e_h245Control);
+			ui.m_h323_uu_pdu.m_h245Control.SetSize(1);
+			ui.m_h323_uu_pdu.m_h245Control[0].SetValue(pdu);
+
+			H225_Facility_UUIE& uuie = (H225_Facility_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
+			uuie.m_protocolIdentifier.SetValue(H225_ProtocolID, PARRAYSIZE(H225_ProtocolID));
+			uuie.m_reason.SetTag(H225_FacilityReason::e_transportedInformation);
+			uuie.IncludeOptionalField(H225_Facility_UUIE::e_callIdentifier);
+			uuie.m_callIdentifier.m_guid = call_id_;
+
+			PPER_Stream stream;
+			ui.Encode(stream);
+			stream.CompleteEncoding();
+			Q931 q931;
+			// 穿越呼叫的 Setup 由我方发出，我方是呼叫发起侧
+			bool from_dest = h460_traversal_ ? false : direction_ == direction_t::incoming;
+			q931.BuildFacility(call_ref_, from_dest);
+			q931.SetIE(Q931::InformationElementCodes::UserUserIE, stream);
+
+			PBYTEArray buffer;
+			q931.Encode(buffer);
+			PBYTEArray tpktbuf = tpkt::serialize(buffer);
+			return h225_sending_queue_->send(h225_skt_, std::string((const char*)tpktbuf.GetPointer(), tpktbuf.GetSize()));
+		}
+
+		void h323_call::start_h245_tunnel()
+		{
+			if (h245_started_)
+				return;
+			h245_started_ = true;
+			h245_tunnel_active_ = true;
+
+			// 隧道生效后不再需要独立的 H.245 连接
+			std::error_code ec;
+			h245_listen_.close(ec);
+
+			if (log_)
+			{
+				std::string url = url_.to_string();
+				log_->debug("H.323 h245 tunneling started, url={}", url)->flush();
+			}
+
+			this->send_terminal_capability_set();
+			this->send_master_slave_determination();
+
+			auto self = shared_from_this();
+			timer_.expires_after(std::chrono::milliseconds(1000));
+			timer_.async_wait(std::bind(&h323_call::handle_timer, this, self, std::placeholders::_1));
+
+			// 对端可能在 Connect 前就经隧道开始能力交换，接通以收到 Connect 为准（见 on_connect）
+			if (connect_received_)
+				invoke_connected();
+		}
+
+		void h323_call::update_h245_tunneling(const H225_H323_UU_PDU& pdu, Q931::MsgTypes msg_type)
+		{
+			// 隧道协商只看对端对我方 Setup 的应答（CallProceeding/Alerting/Progress/Connect）：
+			// 任何一条应答没声明 h245Tunneling=true，就说明对端不走隧道
+			if (!h245_tunneling || h245_started_)
+				return;
+			if (msg_type != Q931::MsgTypes::CallProceedingMsg && msg_type != Q931::MsgTypes::AlertingMsg
+				&& msg_type != Q931::MsgTypes::ProgressMsg && msg_type != Q931::MsgTypes::ConnectMsg)
+				return;
+			if (pdu.HasOptionalField(H225_H323_UU_PDU::e_h245Tunneling) && pdu.m_h245Tunneling)
+				return;
+
+			h245_tunneling = false;
+			if (log_)
+			{
+				std::string url = url_.to_string();
+				log_->debug("H.323 remote refused h245 tunneling, url={}", url)->flush();
+			}
+		}
+
+		void h323_call::handle_tunneled_h245(const H225_H323_UU_PDU& pdu)
+		{
+			// 只要对端在隧道里发来了 H.245，就按隧道处理（对端可能先于 Connect 开始能力交换）
+			if (!h245_tunneling || !pdu.HasOptionalField(H225_H323_UU_PDU::e_h245Control))
+				return;
+			if (!h245_started_)
+				start_h245_tunnel();
+			for (PINDEX i = 0; i < pdu.m_h245Control.GetSize(); i++)
+			{
+				on_h245_tpkt(pdu.m_h245Control[i].GetValue());
+			}
+		}
+
 		bool h323_call::find_compatible_channel(const media_channel_t& chann, media_channel_t& cmp)
 		{
 			for (auto itr = local_channels_.begin(); itr != local_channels_.end(); itr++)
@@ -869,6 +973,13 @@ namespace voip
 			}
 			uuie.IncludeOptionalField(H225_Setup_UUIE::e_callIdentifier);
 			uuie.m_callIdentifier.m_guid = call_id_;
+
+			// 穿越呼叫：通告我方 H.245 监听地址，NAT 后的终端不支持隧道时由它连过来（H.460.18 的 H.245 方向）
+			if (h460_traversal_ && h245_listen_.is_open())
+			{
+				uuie.IncludeOptionalField(H225_Setup_UUIE::e_h245Address);
+				h323_util::h225_transport_address_set(uuie.m_h245Address, PIPSocket::Address(h245_address_), h245_port_);
+			}
 
 
 			//uuie.IncludeOptionalField(H225_Setup_UUIE::e_tokens);
@@ -1196,7 +1307,7 @@ namespace voip
 
 		bool h323_call::send_terminal_capability_set()
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 
 			H245_MultimediaSystemControlMessage msg;
@@ -1268,14 +1379,13 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
 
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_terminal_capability_set_ack(uint32_t seq)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 
 			H245_MultimediaSystemControlMessage msg;
@@ -1289,13 +1399,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_terminal_capability_set_reject(uint32_t seq, H245_TerminalCapabilitySetReject_cause::Choices cause)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 
 			H245_MultimediaSystemControlMessage msg;
@@ -1310,13 +1419,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_master_slave_determination()
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_request);
@@ -1329,13 +1437,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_master_slave_determination_ack(bool is_master)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 
 			H245_MultimediaSystemControlMessage msg;
@@ -1355,13 +1462,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_master_slave_determination_reject()
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 
 			H245_MultimediaSystemControlMessage msg;
@@ -1375,13 +1481,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_generic_indication()
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 
 			H245_MultimediaSystemControlMessage msg;
@@ -1406,13 +1511,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_miscellaneous_indication(int logical_channel)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 
 			H245_MultimediaSystemControlMessage msg;
@@ -1427,13 +1531,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_miscellaneous_command(int logical_channel)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 
 			H245_MultimediaSystemControlMessage msg;
@@ -1449,13 +1552,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_flow_control_indication()
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_indication);
@@ -1471,13 +1573,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_user_input_indication(char digit, int duration_ms)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 
 			H245_MultimediaSystemControlMessage msg;
@@ -1505,13 +1606,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_request_channel_close(int logical_channel, H245_RequestChannelClose_reason::Choices reason)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_request);
@@ -1526,13 +1626,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_request_channel_close_ack(int logical_channel)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_response);
@@ -1545,13 +1644,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_request_channel_close_reject(int logical_channel, H245_RequestChannelCloseReject_cause::Choices cause)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_response);
@@ -1565,14 +1663,13 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_open_audio_logical_channel(int logical_channel, H245_AudioCapability::Choices codec, int session_id,
 			int payload_type,const PIPSocket::Address& local_media_ctrl_address, WORD local_media_ctrl_port)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_request);
@@ -1603,7 +1700,6 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
 
 			if (log_)
 			{
@@ -1613,13 +1709,13 @@ namespace voip
 					url, logical_channel, codec, payload_type, addr, local_media_ctrl_port)->flush();
 			}
 
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_open_video_logical_channel(int logical_channel, H245_VideoCapability::Choices codec, int session_id,int max_bitrate,
 			int payload_type,const PIPSocket::Address& local_media_ctrl_address,WORD local_media_ctrl_port, const H245_ArrayOf_GenericParameter& collapsing)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_request);
@@ -1709,7 +1805,6 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
 
 			if (log_)
 			{
@@ -1719,7 +1814,7 @@ namespace voip
 					url, logical_channel, codec,payload_type, addr, local_media_ctrl_port)->flush();
 			}
 
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 
@@ -1727,7 +1822,7 @@ namespace voip
 			const PString& media_addr, WORD media_port,
 			const PString& media_ctrl_addr, WORD media_ctrl_port)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_response);
@@ -1755,7 +1850,6 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
 
 			if (log_)
 			{
@@ -1766,12 +1860,12 @@ namespace voip
 					url, logical_channel, addr1,media_port, addr2,media_ctrl_port)->flush();
 			}
 
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_open_logical_channel_reject(int logical_channel, H245_OpenLogicalChannelReject_cause::Choices cause)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_response);
@@ -1786,7 +1880,6 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
 
 			if (log_)
 			{
@@ -1794,12 +1887,12 @@ namespace voip
 				log_->debug("H.323 send_open_logical_channel_reject: url={}, chann={}",url, logical_channel)->flush();
 			}
 
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_close_logical_channel(int logical_channel, H245_CloseLogicalChannel_reason::Choices reason)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			
 			H245_MultimediaSystemControlMessage msg;
@@ -1816,7 +1909,6 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
 
 			if (log_)
 			{
@@ -1824,12 +1916,12 @@ namespace voip
 				log_->debug("H.323 send_close_logical_channel: url={}, chann={}, reason={}", url, logical_channel, (int)reason)->flush();
 			}
 
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_close_logical_channel_ack(int logical_channel)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_response);
@@ -1842,7 +1934,6 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
 
 			if (log_)
 			{
@@ -1850,13 +1941,13 @@ namespace voip
 				log_->debug("H.323 send_close_logical_channel_ack: url={}, chann={}", url, logical_channel)->flush();
 			}
 
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 
 		bool h323_call::send_end_session_command()
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_command);
@@ -1869,19 +1960,18 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
 
 			if (log_)
 			{
 				std::string url = url_.to_string();
 				log_->debug("H.323 send_end_session_command: url={}", url)->flush();
 			}
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_round_trip_delay_request()
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_request);
@@ -1893,13 +1983,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_round_trip_delay_response(uint32_t seq)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_response);
@@ -1912,13 +2001,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_h239_flow_control_release_request(unsigned logical_channel, unsigned bit_rate)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_request);
@@ -1939,13 +2027,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_h239_flow_control_release_response(unsigned logical_channel, bool acknowledge)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_response);
@@ -1968,12 +2055,11 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 		bool h323_call::send_h239_presentation_request(unsigned logical_channel, unsigned symmetry_breaking, unsigned terminal_label)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_request);
@@ -1995,13 +2081,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_h239_presentation_response(unsigned logical_channel,bool acknowledge, unsigned terminal_label)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_response);
@@ -2034,13 +2119,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_h239_presentation_release(unsigned logical_channel, unsigned terminal_label)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_command);
@@ -2061,13 +2145,12 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		bool h323_call::send_h239_presentation_owner(unsigned logical_channel, unsigned terminal_label)
 		{
-			if (!h245_skt_)
+			if (!h245_ready())
 				return false;
 			H245_MultimediaSystemControlMessage msg;
 			msg.SetTag(H245_MultimediaSystemControlMessage::e_indication);
@@ -2088,8 +2171,7 @@ namespace voip
 			PPER_Stream stream;
 			msg.Encode(stream);
 			stream.CompleteEncoding();
-			PBYTEArray buf = tpkt::serialize(stream);
-			return h245_sending_queue_->send(h245_skt_, std::string((const char*)buf.GetPointer(), buf.GetSize()));
+			return send_h245(stream);
 		}
 
 		void h323_call::fill_capability(H245_ArrayOf_CapabilityTableEntry& entries, H245_ArrayOf_CapabilityDescriptor& descs)
@@ -2271,6 +2353,18 @@ namespace voip
 			update();
 			
 			Q931::MsgTypes msg_type=q931.GetMessageType();
+
+			// H.245 隧道：先按应答更新协商结果，消息本身处理完后再处理其中携带的 H.245
+			H225_H323_UserInformation tunnel_ui;
+			bool has_uu = false;
+			if (h245_tunneling && q931.HasIE(Q931::InformationElementCodes::UserUserIE))
+			{
+				PPER_Stream tunnel_stream(q931.GetIE(Q931::InformationElementCodes::UserUserIE));
+				has_uu = tunnel_ui.Decode(tunnel_stream);
+				if (has_uu)
+					update_h245_tunneling(tunnel_ui.m_h323_uu_pdu, msg_type);
+			}
+
 			if (msg_type == Q931::MsgTypes::SetupMsg)
 			{
 				PBYTEArray uuie_data = q931.GetIE(Q931::InformationElementCodes::UserUserIE);
@@ -2372,6 +2466,11 @@ namespace voip
 			}
 			
 			
+
+			if (has_uu)
+			{
+				handle_tunneled_h245(tunnel_ui.m_h323_uu_pdu);
+			}
 		}
 
 		void h323_call::on_h245_tpkt(const PBYTEArray& tpkt)
@@ -2667,6 +2766,25 @@ namespace voip
 			{
 				return;  // This seems is heartbeat
 			}
+			// 只为承载隧道 H.245 而发的 Facility，内容已由 handle_tunneled_h245 处理
+			if (uuie.m_reason.GetTag() == H225_FacilityReason::e_transportedInformation)
+			{
+				return;
+			}
+			// 穿越呼叫已经发过 Setup：之后的 Facility 只认 startH245，不能再当作呼入通知重发 Setup
+			if (h460_traversal_)
+			{
+				if (uuie.m_reason.GetTag() == H225_FacilityReason::e_startH245 && uuie.HasOptionalField(H225_Facility_UUIE::e_h245Address))
+				{
+					PIPSocket::Address ip;
+					WORD port = 0;
+					if (h323::h323_util::h225_transport_address_get(uuie.m_h245Address, ip, port))
+					{
+						connect_remote_h245(ip, port);
+					}
+				}
+				return;
+			}
 
 			/*
 			if (pdu.HasOptionalField(H225_H323_UU_PDU::e_genericData))
@@ -2736,6 +2854,20 @@ namespace voip
 			}
 			else
 			{
+				// H.460.18：终端收到网守的 SCI 后主动连入并发来 Facility，由我方在这条连接上发 Setup。
+				// 终端在 NAT 之后，H.245 改走隧道或由终端连我方：Setup 里发起隧道协商并带上我方 H.245 监听地址
+				h460_traversal_ = true;
+				h245_tunneling = true;
+				if (!this->start_h245_listen())
+				{
+					if (log_)
+					{
+						std::string s1 = url_.to_string();
+						log_->warn("H.323: traversal call h245 listen failed, rely on tunneling only. url={}", s1)->flush();
+					}
+					std::error_code ec2;
+					h245_listen_.close(ec2);
+				}
 				this->send_setup(url);
 			}
 
@@ -2743,7 +2875,7 @@ namespace voip
 			{
 				std::string s1 = url_.to_string();
 				std::string s2 = (const std::string&)call_id_.AsString();
-				log_->debug("H.323: on_facility,url={}, call_id={}, h225addr={}:{}", s1,s2, dest_addr,dest_port)->flush();
+				log_->debug("H.323: on_facility,url={}, call_id={}, h225addr={}:{}, traversal={}", s1,s2, dest_addr,dest_port, h460_traversal_)->flush();
 			}
 		}
 
@@ -2754,46 +2886,114 @@ namespace voip
 				remote_alias_ = (const std::string&)q931.GetDisplayName();
 			}
 			auto self = shared_from_this();
-			if (!uuie.HasOptionalField(H225_Connect_UUIE::e_h245Address)){
-				if (on_hangup)
-				{
-					auto self = shared_from_this();
-					on_hangup(self, call::reason_code_t::h225_connect_failed);
-				}
-				return;
-			}
+			connect_received_ = true;
 
 			PIPSocket::Address h245addr;
-			if(!h323_util::h225_transport_address_get(uuie.m_h245Address, h245addr, h245_port_)){
-				if (on_hangup)
-				{
-					auto self = shared_from_this();
-					on_hangup(self, call::reason_code_t::h225_connect_failed);
-				}
-				return;
-			}
-			h245_address_ = h245addr.AsString();
-			
-			if (!this->start_h245_connect(h245_address_,h245_port_))
-			{
-				if (on_hangup)
-				{
-					auto self = shared_from_this();
-					on_hangup(self, call::reason_code_t::h225_connect_failed);
-				}
-				return;
-			}
-			
+			WORD h245port = 0;
+			bool has_h245addr = uuie.HasOptionalField(H225_Connect_UUIE::e_h245Address)
+				&& h323_util::h225_transport_address_get(uuie.m_h245Address, h245addr, h245port);
+
 			if (log_)
 			{
 				std::string url = url_.to_string();
 				std::string call_id = (const std::string&)call_id_.AsString();
-				std::string addr = (const std::string&)h245_address_;
-				log_->debug("H.323: on_connect,url={}, call_id={}, h245addr={}:{}", url, call_id, addr, h245_port_)->flush();
+				std::string addr = has_h245addr ? (const std::string&)h245addr.AsString() : std::string();
+				log_->debug("H.323: on_connect,url={}, call_id={}, h245addr={}:{}, tunneling={}, traversal={}, h245_started={}",
+					url, call_id, addr, h245port, h245_tunneling, h460_traversal_, h245_started_)->flush();
 			}
-			
 
+			// 穿越呼叫里终端可能在 Connect 之前就连入了 H.245，此时只差补报接通
+			if (h245_started_)
+			{
+				invoke_connected();
+				return;
+			}
+
+			// 双方都声明了隧道：H.245 直接走 H.225 信令连接
+			if (h245_tunneling)
+			{
+				start_h245_tunnel();
+				return;
+			}
+
+			if (!has_h245addr)
+			{
+				// 穿越呼叫已在 Setup 里通告了我方 H.245 地址，等终端连进来
+				if (h460_traversal_ && h245_listen_.is_open())
+					return;
+				if (on_hangup)
+				{
+					on_hangup(self, call::reason_code_t::h225_connect_failed);
+				}
+				return;
+			}
+
+			connect_remote_h245(h245addr, h245port);
 		}
+
+		void h323_call::connect_remote_h245(const PIPSocket::Address& addr, WORD port)
+		{
+			if (h245_started_)
+				return;
+
+			auto self = shared_from_this();
+			std::string url = url_.to_string();
+			std::string saddr = (const std::string&)addr.AsString();
+			if (h460_traversal_ && h245_listen_.is_open() && !is_h245_address_reachable(addr))
+			{
+				// 终端在 NAT 之后通告了私网地址，主动去连只会挂到超时；等它按 Setup 里的地址连我方
+				if (log_)
+				{
+					log_->info("H.323: remote h245 address unreachable, wait for remote to connect. url={},h245addr={}:{},local_h245_port={}",
+						url, saddr, port, h245_port_)->flush();
+				}
+				return;
+			}
+
+			// 改为我方主动连：关闭监听，避免终端同时连入出现两条 H.245
+			std::error_code ec;
+			h245_listen_.close(ec);
+			h245_address_ = addr.AsString();
+			h245_port_ = port;
+			if (!this->start_h245_connect(saddr, port))
+			{
+				if (on_hangup)
+				{
+					on_hangup(self, call::reason_code_t::h225_connect_failed);
+				}
+			}
+		}
+
+		bool h323_call::is_h245_address_reachable(const PIPSocket::Address& addr)
+		{
+			// 与信令连接的对端 IP 相同：地址就是终端的公网/可达地址
+			std::error_code ec;
+			std::string peer_ip;
+			if (h225_skt_)
+			{
+				auto peer = h225_skt_->remote_endpoint(ec);
+				if (!ec)
+					peer_ip = peer.address().to_string(ec);
+			}
+			std::string ip = (const std::string&)addr.AsString();
+			if (!peer_ip.empty() && ip == peer_ip)
+				return true;
+
+			// 私网 / CGNAT / 链路本地 / 回环地址从公网连不到；其它公网地址（终端配了静态 NAT）视为可达
+			auto a = asio::ip::make_address_v4(ip, ec);
+			if (ec)
+				return true;
+			uint32_t v = a.to_uint();
+			bool is_private = (v >> 24) == 10                       // 10.0.0.0/8
+				|| (v >> 20) == ((172u << 4) | 1)                    // 172.16.0.0/12
+				|| (v >> 16) == ((192u << 8) | 168)                  // 192.168.0.0/16
+				|| (v >> 22) == ((100u << 2) | 1)                    // 100.64.0.0/10
+				|| (v >> 16) == ((169u << 8) | 254)                  // 169.254.0.0/16
+				|| (v >> 24) == 127                                  // 127.0.0.0/8
+				|| v == 0;
+			return !is_private;
+		}
+
 		void h323_call::on_release_complete(const H225_ReleaseComplete_UUIE& uuie)
 		{
 			if (log_)
@@ -4031,6 +4231,16 @@ namespace voip
 		{
 			if (ec)
 				return;
+			// 已经走隧道或已主动连上：不再接受第二条 H.245 连接
+			if (h245_started_)
+			{
+				std::error_code ec2;
+				socket.close(ec2);
+				return;
+			}
+			h245_started_ = true;
+			// 建立了独立 H.245 连接，隧道即失效（H.225 规定二者择一）
+			h245_tunneling = false;
 
 			h245_skt_ = std::make_shared<asio::ip::tcp::socket>(std::move(socket));
 
@@ -4051,13 +4261,16 @@ namespace voip
 				log_->debug("H245 accepted,url={}", url)->flush();
 			}
 
-			invoke_connected();
+			// 穿越呼叫里终端可能在 Connect 之前连入，接通以收到 Connect 为准（见 on_connect）
+			if (!h460_traversal_ || connect_received_)
+				invoke_connected();
 		}
 
 		void h323_call::handle_connect_h245(call_ptr call, const std::error_code& ec)
 		{
 			if (ec)
 				return;
+			h245_started_ = true;
 
 			h245_skt_->async_read_some(asio::buffer(h245_recv_buffer_), std::bind(&h323_call::handle_read_h245, this, call, std::placeholders::_1, std::placeholders::_2));
 

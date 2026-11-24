@@ -97,6 +97,20 @@ namespace voip
 			bool start_h245_listen();
 			bool start_h245_connect(const std::string& h245_addr,int h245_port);
 
+			// H.245 通道是否可用：已有 H.245 TCP 连接，或已协商为隧道
+			bool h245_ready()const { return h245_skt_ != nullptr || h245_tunnel_active_; }
+			// 发送一条已 PER 编码的 H.245 消息：隧道模式装进 H.225 Facility 的 h245Control，否则加 TPKT 头走 H.245 连接
+			bool send_h245(const PBYTEArray& pdu);
+			// 启用 H.245 隧道：之后 H.245 全部经 H.225 信令连接收发，并开始能力交换
+			void start_h245_tunnel();
+			// H.225 消息里的隧道协商结果与隧道承载的 H.245 消息
+			void update_h245_tunneling(const H225_H323_UU_PDU& pdu, Q931::MsgTypes msg_type);
+			void handle_tunneled_h245(const H225_H323_UU_PDU& pdu);
+			// 对端通告的 H.245 地址从我方能否连到：私网地址且与信令连接的来源 IP 不同，视为连不到
+			bool is_h245_address_reachable(const PIPSocket::Address& addr);
+			// 处理对端通告的 H.245 地址（Connect / Facility startH245）：能连就主动连；穿越模式下连不到就等终端连进来
+			void connect_remote_h245(const PIPSocket::Address& addr, WORD port);
+
 			bool find_compatible_channel(const media_channel_t& chann, media_channel_t& cmp);
 
 			void start_open_local_chnnnels();
@@ -267,7 +281,14 @@ namespace voip
 			PString h245_address_;
 			WORD h245_port_ = 0;
 			asio::ip::tcp::endpoint h245_connect_ep_;
-			bool h245_tunneling = false;
+			bool h245_tunneling = false;   // 我方 H.225 消息里的 h245Tunneling 标志；穿越呼叫置 true 发起隧道协商，对端不支持时清回 false
+			bool h245_tunnel_active_ = false; // 隧道已生效：H.245 经 H.225 收发，不再建 H.245 连接
+
+			// H.460.18 穿越呼叫：终端注册在我方网守、由网守 SCI 通知后主动连进来的呼叫，终端在 NAT 之后。
+			// 此时 H.245 不能由我方主动去连终端（它通告的多为私网地址），改为隧道或由终端连我方
+			bool h460_traversal_ = false;
+			bool connect_received_ = false;  // 已收到对端 Connect（穿越呼叫里终端可能早于 Connect 连入 H.245，接通以 Connect 为准）
+			bool h245_started_ = false;      // H.245 已启动（连接建立或隧道生效），避免重复启动
 			uint32_t call_ref_ = 0;
 			rtpx::port_range_ptr h245_ports_;
 			
