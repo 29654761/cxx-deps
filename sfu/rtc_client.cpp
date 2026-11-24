@@ -72,6 +72,17 @@ bool rtc_client::auto_subscribe(bool audio, bool video)
 	return true;
 }
 
+bool rtc_client::set_device_type(int device_type)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!handle_)
+		return false;
+
+	// 只在入会时上报一次，必须在 join_channel 之前设置
+	rtc_set_device_type(handle_, device_type);
+	return true;
+}
+
 bool rtc_client::join_channel(const char* token)
 {
 	std::lock_guard<std::mutex> lock(mutex_);

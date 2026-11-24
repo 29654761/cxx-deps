@@ -45,6 +45,9 @@ public:
 	bool open();
 	void close();
 	bool auto_subscribe(bool audio, bool video);
+	// 设置入会上报的设备类型（librtc 0.3.0 起的 rtc_set_device_type）：open() 之后、join_channel() 之前调用；
+	// <=0 恢复默认 80（服务端代理）。设备网关按接入设备报 80+设备类型（如 SIP=82、H323=83）
+	bool set_device_type(int device_type);
 	bool join_channel(const char* token);
 	bool wait_join(int msec) {
 		return signal_.wait(msec);
