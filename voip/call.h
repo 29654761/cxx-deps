@@ -6,6 +6,9 @@
 #include <sip/voip_uri.h>
 #include <spdlog/spdlogger.hpp>
 
+// 有 call::final_response_t / get_final_response()（对端给出的呼叫最终结果）。上层可据此条件编译，兼容没有该接口的旧版本
+#define VOIP_CALL_HAS_FINAL_RESPONSE 1
+
 namespace voip
 {
 	enum class call_type_t
