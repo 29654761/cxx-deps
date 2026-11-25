@@ -122,7 +122,7 @@ void sip_server::handle_message(sip_server_ptr svr, sip_connection_ptr con, cons
 
 void sip_server::handle_remove(sip_server_ptr svr, sip_connection_ptr con)
 {
-	remove_connection(con->id());
+	remove_connection(con);
 }
 
 void sip_server::handle_accept(sip_server_ptr svr, const std::error_code& ec, asio::ip::tcp::socket newsocket)
@@ -307,26 +307,26 @@ bool sip_server::add_connection(sip_connection_ptr con)
 	return true;
 }
 
-void sip_server::remove_connection(const std::string& id)
+void sip_server::remove_connection(sip_connection_ptr con)
 {
-	sip_connection_ptr con;
+	if (!con)
+		return;
+
 	{
 		std::lock_guard<std::mutex> lk(connections_mutex_);
-		auto itr=connections_.find(id);
-		if (itr != connections_.end())
-		{
-			con = itr->second;
-			connections_.erase(itr);
-		}
+		auto itr=connections_.find(con->id());
+		// 按指针比对删除：同一远端 id 下可能已换成新连接（同目标并发呼出各持独立连接对象、
+		// 收包通道也会按需重建）。这里若误删现存量，close_con_handler_ 会拿着别的连接对象
+		// 回调 endpoint::handle_close，按对象匹配时正好命中持有新连接的呼叫，误停通话
+		if (itr == connections_.end() || itr->second != con)
+			return;
+		connections_.erase(itr);
 	}
 
-	if (con)
+	if (close_con_handler_)
 	{
-		if (close_con_handler_)
-		{
-			auto self = shared_from_this();
-			close_con_handler_(self, con);
-		}
+		auto self = shared_from_this();
+		close_con_handler_(self, con);
 	}
 }
 

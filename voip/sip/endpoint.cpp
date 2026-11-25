@@ -405,6 +405,7 @@ namespace voip
 
 		std::shared_ptr<sip_call> endpoint::find_call_by_connection(const std::string& con_id)
 		{
+			// 连接 id 只含远端地址，同对端并发呼叫的 con_id 相同、会命中多个，取第一个即返回
 			std::vector<std::shared_ptr<sip_call>> calls;
 			this->all_calls(calls);
 			std::shared_ptr<sip_call> call;
@@ -413,6 +414,7 @@ namespace voip
 				if ((*itr)->con_id() == con_id)
 				{
 					call = *itr;
+					break;
 				}
 			}
 
@@ -573,20 +575,19 @@ namespace voip
 		void endpoint::handle_close(endpoint_ptr ep, sip_server_ptr svr, sip_connection_ptr con)
 		{
 			// 按连接对象匹配持有该连接的呼叫：连接 id 只含远端地址，同目标地址的并发呼出连接
-			// id 相同，按 id 字符串匹配会误停别的呼叫（保持旧语义：多个命中取最后一个）
+			// id 相同，按 id 字符串匹配会误停别的呼叫。连接关闭即传输断开，共用该连接的所有
+			// 呼叫（注册/GK 呼叫共用一条连接、同对端入向呼叫共用一条入向连接）都已无法收发
+			// 信令，全部停止，不再留待各自 90s 不活跃超时兜底；普通呼出每呼叫独占一个连接，
+			// 行为与原先只停一个一致。stop() 内部有 active_ 原子防重入，与 close_handler_
+			// 等其他停止路径并发安全
 			std::vector<std::shared_ptr<sip_call>> calls;
 			all_calls(calls);
-			std::shared_ptr<sip_call> call;
 			for (auto itr = calls.begin(); itr != calls.end(); itr++)
 			{
 				if ((*itr)->get_con() == con)
 				{
-					call = *itr;
+					(*itr)->stop(call::reason_code_t::ok);
 				}
-			}
-			if (call)
-			{
-				call->stop(call::reason_code_t::ok);
 			}
 		}
 

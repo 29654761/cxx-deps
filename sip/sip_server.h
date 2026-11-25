@@ -44,7 +44,7 @@ private:
 	void handle_timer(sip_server_ptr svr, const std::error_code& ec);
 private:
 	bool add_connection(sip_connection_ptr con);
-	void remove_connection(const std::string& id);
+	void remove_connection(sip_connection_ptr con);
 	void all_connections(std::vector<sip_connection_ptr>& cons);
 	void clear_connections();
 protected:
