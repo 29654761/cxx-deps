@@ -2452,6 +2452,15 @@ namespace voip
 			}
 			else if (msg_type == Q931::MsgTypes::ReleaseCompleteMsg)
 			{
+				// 呼叫最终结果：Q.931 Cause（对端不一定带）+ H225 ReleaseCompleteReason（可选），留给上层区分忙/拒绝/无应答
+				final_response_t rsp;
+				if (q931.HasIE(Q931::InformationElementCodes::CauseIE))
+				{
+					Q931::CauseValues cause = q931.GetCause();
+					if (cause != Q931::CauseValues::ErrorInCauseIE)
+						rsp.code = (int)cause;
+				}
+				std::string reason_name;
 				PBYTEArray uuie_data = q931.GetIE(Q931::InformationElementCodes::UserUserIE);
 				H225_H323_UserInformation ui;
 				PPER_Stream pper_stream(uuie_data);
@@ -2460,8 +2469,22 @@ namespace voip
 					if (ui.m_h323_uu_pdu.m_h323_message_body.GetTag() == H225_H323_UU_PDU_h323_message_body::e_releaseComplete)
 					{
 						const H225_ReleaseComplete_UUIE& uuie = (const H225_ReleaseComplete_UUIE&)ui.m_h323_uu_pdu.m_h323_message_body;
+						if (uuie.HasOptionalField(H225_ReleaseComplete_UUIE::e_reason))
+						{
+							rsp.h225_reason = (int)uuie.m_reason.GetTag();
+							reason_name = (const char*)uuie.m_reason.GetTagName();
+						}
 						on_release_complete(uuie);
 					}
+				}
+				rsp.text = "ReleaseComplete cause=" + std::to_string(rsp.code);
+				if (rsp.h225_reason >= 0)
+					rsp.text += " reason=" + reason_name;
+				set_final_response(rsp);
+				if (log_)
+				{
+					std::string url = url_.to_string();
+					log_->info("H.323: release complete received, url={}, {}", url, rsp.text)->flush();
 				}
 			}
 			

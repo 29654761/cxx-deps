@@ -1092,6 +1092,8 @@ namespace voip
 		void sip_call::on_decline(const sip_message& msg)
 		{
 			got_bye = true;
+			// 603 Decline：对端拒接（on_hangup 仍按 busy 回调，保持原有行为），状态码留给上层细分
+			set_invite_final_response(msg);
 			// INVITE 事务已因 603 终结：对话从未确认（got_ack 不置位），停止任何未决事务的收尾动作
 			invite_pending_ = false;
 			got_invite_final_rsp = true;
@@ -1113,6 +1115,15 @@ namespace voip
 				auto self = shared_from_this();
 				on_hangup(self, call::reason_code_t::busy);
 			}
+		}
+
+		void sip_call::set_invite_final_response(const sip_message& msg)
+		{
+			final_response_t rsp;
+			std::string status = msg.status();
+			rsp.code = atoi(status.c_str());
+			rsp.text = "SIP/2.0 " + status + " " + msg.msg();
+			set_final_response(rsp);
 		}
 
 		void sip_call::on_options(const sip_message& msg)
@@ -1166,6 +1177,8 @@ namespace voip
 					invite_pending_ = false;
 					got_invite_final_rsp = true;
 					ack(msg);
+					// 记下终极响应，上层据状态码区分忙（486）、无应答（408/480）、不可达（404/5xx）等
+					set_invite_final_response(msg);
 				}
 				// OPTIONS 心跳与 INFO 按键被拒（如 415/501 不支持）不影响通话，不挂断
 				if (method != "OPTIONS" && method != "INFO")

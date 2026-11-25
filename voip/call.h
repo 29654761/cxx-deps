@@ -80,6 +80,18 @@ namespace voip
 		// 注意：回调在 RTP 接收线程或信令线程上执行，不要在回调里做耗时操作。
 		typedef std::function<void(call_ptr, char digit, int duration_ms)> on_dtmf_t;
 
+		// 对端给出的呼叫最终结果（SIP INVITE 的 3xx-6xx 终极响应 / H.323 ReleaseComplete），
+		// 供上层在呼叫失败时区分忙、拒接、无应答、不可达。on_hangup 只给粗粒度的 reason_code_t，细节在这里。
+		struct final_response_t
+		{
+			// SIP：终极响应状态码（如 486、603）；H.323：Q.931 Cause 值（如 17 用户忙、21 拒绝），对端没带 Cause 时为 0
+			int code = 0;
+			// 仅 H.323：H225 ReleaseCompleteReason 的选项序号（如 e_adaptiveBusy=9、e_destinationRejection=3），没带为 -1
+			int h225_reason = -1;
+			// 原始说明：SIP 为状态行（如 "SIP/2.0 486 Busy Here"），H.323 为 "ReleaseComplete cause=.. reason=.."
+			std::string text;
+		};
+
 		call(const std::string& local_alias,const std::string& remote_alias, direction_t direction,
 			const std::string& nat_address, int port, rtpx::port_range_ptr rtp_ports,
 			asio::io_context& ioc, spdlogger_ptr log);
@@ -125,6 +137,8 @@ namespace voip
 		// 若对端申请仍挂起未应答，直接回拒绝。对端令牌释放后照常回调 on_presentation_role_changed(false, false)
 		virtual bool revoke_presentation_role() { return false; }
 		virtual bool remote_addr(std::string& ip, int& port) = 0;
+		// 取对端给出的呼叫最终结果（见 final_response_t）。还没收到过返回 false。任意线程可调
+		bool get_final_response(final_response_t& rsp) const;
 
 		void set_on_remote_ringing(on_ringing_t handler) { on_remote_ringing = handler; }
 		void set_on_connected(on_connected_t handler) { on_connected = handler; }
@@ -176,6 +190,8 @@ namespace voip
 
 		void invoke_connected();
 		void invoke_hangup(reason_code_t reason);
+		// 记下对端给出的呼叫最终结果，子类在收到 SIP 终极响应 / H.323 ReleaseComplete 时调用（须在回调 on_hangup 之前）
+		void set_final_response(const final_response_t& rsp);
 		// 统一的按键出口：过滤非法字符后回调 on_dtmf
 		void invoke_dtmf(char digit, int duration_ms);
 
@@ -253,6 +269,9 @@ namespace voip
 	private:
 		asio::io_context& ioc_;								// 通话所在的 io_context，应答辅流令牌申请时投递到这里
 		std::atomic<uint64_t> presentation_request_seq_{ 0 };	// 辅流令牌申请标识的递增计数
+		mutable std::mutex final_rsp_mutex_;					// 保护 final_rsp_ / has_final_rsp_（信令线程写、上层读）
+		final_response_t final_rsp_;							// 对端给出的呼叫最终结果
+		bool has_final_rsp_ = false;
 
 		// ---------- 发按键（send_dtmf）----------
 		// 待发的一个按键；digit 为 ',' 时表示停顿

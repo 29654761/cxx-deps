@@ -45,6 +45,8 @@ namespace voip
 			void on_bye(const sip_message& msg);
 			void on_cancel(const sip_message& msg);
 			void on_decline(const sip_message& msg);
+			// INVITE 收到 3xx-6xx 终极响应：记下状态码与状态行（见 call::final_response_t）
+			void set_invite_final_response(const sip_message& msg);
 			void on_options(const sip_message& msg);
 			void on_response(const sip_message& msg);
 			void on_update(const sip_message& msg);

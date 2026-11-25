@@ -612,6 +612,22 @@ namespace voip
 		}
 	}
 
+	bool call::get_final_response(final_response_t& rsp) const
+	{
+		std::lock_guard<std::mutex> lk(final_rsp_mutex_);
+		if (!has_final_rsp_)
+			return false;
+		rsp = final_rsp_;
+		return true;
+	}
+
+	void call::set_final_response(const final_response_t& rsp)
+	{
+		std::lock_guard<std::mutex> lk(final_rsp_mutex_);
+		final_rsp_ = rsp;
+		has_final_rsp_ = true;
+	}
+
 	void call::invoke_hangup(reason_code_t reason)
 	{
 		if (on_hangup)
