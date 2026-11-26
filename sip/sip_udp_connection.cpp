@@ -52,7 +52,12 @@ bool sip_udp_connection::local_address(std::string& ip, int& port)const
 {
 	if (!socket_)
 		return false;
-	auto ep = socket_->local_endpoint();
+	// 带错误码调用：socket 未打开/已关闭时无参重载会抛 asio::system_error，
+	// io 线程上无人捕获会直接 std::terminate
+	std::error_code ec;
+	auto ep = socket_->local_endpoint(ec);
+	if (ec)
+		return false;
 	ip = ep.address().to_string();
 	port = ep.port();
 	return true;

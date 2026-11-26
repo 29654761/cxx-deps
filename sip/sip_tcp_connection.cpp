@@ -45,9 +45,9 @@ sip_tcp_connection::~sip_tcp_connection()
 
 bool sip_tcp_connection::start()
 {
-	if (active_)
+	// check-and-set 一步完成：已启动（exchange 返回旧值 true）直接返回，并发 start 只有一个真正初始化
+	if (active_.exchange(true))
 		return true;
-	active_ = true;
 	if (!sip_connection::start())
 	{
 		//invoke_close();
@@ -91,12 +91,25 @@ bool sip_tcp_connection::start()
 
 void sip_tcp_connection::stop()
 {
-	active_ = false;
-	if (socket_)
+	// 同一连接的 stop 会从多个 io 线程并发进来：呼叫收尾（sip_call::handle_stop_teardown
+	// 500ms 后 con->stop()，共用一条连接的每个呼叫各触发一次）、对端断开/收包出错
+	// （handle_read → invoke_close）、注册终端超时注销（reg_endpoint）、GK 停止（gk_client）、
+	// 新连接顶掉旧连接（sip_server::add_connection）、服务器全停（sip_server::stop）。
+	// socket 不是线程安全的：两个线程同时 close() 会在 asio deregister_descriptor 里竞态崩溃
+	// （先完成的把 descriptor_data 清零，后到的已过空指针检查，加锁后再读拿到空指针，
+	// 读 shutdown_ 字段段错误，segfault at a3）。exchange 防重入，close 只由第一个进来的
+	// 线程执行一次；后进来的直接返回，连接表摘除（sip_connection::stop → remove_connection）
+	// 也随第一个线程触发，remove_connection 本身按指针比对幂等
+	if (!active_.exchange(false))
+		return;
 	{
-		std::error_code ec;
-		socket_->close(ec);
-		//std::string err = ec.message();
+		std::lock_guard<std::mutex> lk(socket_mutex_);
+		if (socket_)
+		{
+			std::error_code ec;
+			socket_->close(ec);
+			//std::string err = ec.message();
+		}
 	}
 	//recv_ring_buffer_.clear();
 	//sending_queue_->clear();
@@ -106,7 +119,10 @@ void sip_tcp_connection::stop()
 bool sip_tcp_connection::send_message(const sip_message& message)
 {
 	// 已停/未启动的连接不再排队发送：sending_queue 的异步写在已关闭的 socket 上必然失败，
-	// 排进去只会让 "Send sip message" 日志看起来发出去了（实际被静默丢弃）
+	// 排进去只会让 "Send sip message" 日志看起来发出去了（实际被静默丢弃）。
+	// 与并发 close 的安全性：socket_ 指针在对象存续期间不置空，sending_queue 自带锁，
+	// 已挂起的写被 close 取消后以 operation_aborted 完成并由队列自清理（asio 内部保护），
+	// 因此这里只需快速检查 active_/socket_，不用加 socket_mutex_
 	if (!socket_ || !active_)
 	{
 		return false;
@@ -195,8 +211,15 @@ void sip_tcp_connection::handle_read(sip_connection_ptr con, const std::error_co
 		rdsize -= (size_t)r;
 	}
 
+	// 重挂读与另一线程的 close() 在 socket_mutex_ 上串行：close 完成后 active_ 已为 false，
+	// 不会再挂；若读先挂上、close 后进，close 会取消挂起的读（handler 以 operation_aborted
+	// 返回再走 invoke_close → stop，exchange 防重入兜住），不会出现挂读与关闭同时进行
 	if (active_) {
-		socket_->async_read_some(asio::buffer(recv_buffer_.data(), recv_buffer_.size()), std::bind(&sip_tcp_connection::handle_read, this, con, std::placeholders::_1, std::placeholders::_2));
+		std::lock_guard<std::mutex> lk(socket_mutex_);
+		if (socket_)
+		{
+			socket_->async_read_some(asio::buffer(recv_buffer_.data(), recv_buffer_.size()), std::bind(&sip_tcp_connection::handle_read, this, con, std::placeholders::_1, std::placeholders::_2));
+		}
 	}
 }
 

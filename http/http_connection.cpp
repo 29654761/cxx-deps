@@ -143,14 +143,20 @@ std::string http_connection::get_client_address(const http_request& request)
 	{
 		if (socket_)
 		{
-			asio::error_code ec;
-			address = socket_->remote_endpoint().address().to_string(ec);
-		}
-		else if (ssl_socket_)
-		{
-			asio::error_code ec;
-			address = ssl_socket_->lowest_layer().remote_endpoint().address().to_string(ec);
-		}
+				asio::error_code ec;
+				// 带错误码调用：连接已断开时无参 remote_endpoint() 会抛 asio::system_error，
+				// io 线程上无人捕获会直接 std::terminate
+				auto ep = socket_->remote_endpoint(ec);
+				if (!ec)
+					address = ep.address().to_string();
+			}
+			else if (ssl_socket_)
+			{
+				asio::error_code ec;
+				auto ep2 = ssl_socket_->lowest_layer().remote_endpoint(ec);
+				if (!ec)
+					address = ep2.address().to_string();
+			}
 		
 	}
 	return address;
